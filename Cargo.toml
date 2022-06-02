@@ -7,3 +7,8 @@ edition = "2021"
 
 [dependencies]
 libember-sys = { path = "../libember-sys", features = ["doc"] }
+anyhow = "1.0.57"
+log = "0.4.17"
+
+[dev-dependencies]
+env_logger = "0.9.0"
