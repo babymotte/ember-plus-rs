@@ -17,6 +17,7 @@
 
 use crate::error::{EmberError, EmberResult};
 use std::{io::Read, slice};
+use tokio::io::{AsyncRead, AsyncReadExt};
 
 pub const BOF: u8 = 0xFE;
 pub const EOF: u8 = 0xFF;
@@ -172,6 +173,24 @@ impl S101Frame {
         }
     }
 
+    pub async fn decode(
+        mut data: impl AsyncRead + Unpin,
+        buf: &mut [u8],
+    ) -> EmberResult<Option<S101Frame>> {
+        data.read_exact(&mut buf[..1]).await?;
+
+        if buf[0] == BOF {
+            S101Frame::decode_escaping(data, buf).await.map(Some)
+        } else if buf[0] == BOFNE {
+            S101Frame::decode_non_escaping(data, buf).await
+        } else {
+            Err(EmberError::Deserialization(format!(
+                "invalid first byte: {:#04x}",
+                buf[0]
+            )))
+        }
+    }
+
     fn decode_escaping_blocking(mut data: impl Read, buf: &mut [u8]) -> EmberResult<S101Frame> {
         let mut crc = CRC_SEED;
         let mut xor = false;
@@ -179,6 +198,48 @@ impl S101Frame {
         let mut pos = 0;
         loop {
             data.read_exact(slice::from_mut(&mut b))?;
+            if b == BOF {
+                return Err(EmberError::Deserialization("Unexpected BOF".to_owned()));
+            }
+
+            if b == EOF {
+                break;
+            }
+
+            if b == CE {
+                xor = true;
+                continue;
+            }
+
+            if xor {
+                xor = false;
+                b = b ^ XOR;
+            }
+
+            crc = update_crc(crc, b);
+            buf[pos] = b;
+            pos += 1;
+        }
+        if crc != CRC_CHECK {
+            return Err(EmberError::Deserialization(format!(
+                "Invalid CRC: {crc:#06x}"
+            )));
+        }
+
+        // last two bytes were CRC, so we exclude those
+        S101Frame::from_bytes(&buf[..pos - 2])
+    }
+
+    async fn decode_escaping(
+        mut data: impl AsyncRead + Unpin,
+        buf: &mut [u8],
+    ) -> EmberResult<S101Frame> {
+        let mut crc = CRC_SEED;
+        let mut xor = false;
+        let mut b: u8 = 0x00;
+        let mut pos = 0;
+        loop {
+            data.read_exact(slice::from_mut(&mut b)).await?;
             if b == BOF {
                 return Err(EmberError::Deserialization("Unexpected BOF".to_owned()));
             }
@@ -235,6 +296,34 @@ impl S101Frame {
         }
 
         data.read_exact(&mut buf[..payload_len])?;
+
+        S101Frame::from_bytes(&buf[..payload_len]).map(Some)
+    }
+
+    async fn decode_non_escaping(
+        mut data: impl AsyncRead + Unpin,
+        buf: &mut [u8],
+    ) -> EmberResult<Option<S101Frame>> {
+        data.read_exact(&mut buf[..1]).await?;
+
+        let payload_bytes = buf[0] as usize;
+        if payload_bytes == 0 {
+            return Ok(None);
+        }
+
+        data.read_exact(&mut buf[..payload_bytes]).await?;
+
+        let mut payload_len = 0usize;
+        for b in &buf[..payload_bytes] {
+            payload_len = payload_len << 8;
+            payload_len += *b as usize;
+        }
+
+        if payload_len == 0 {
+            return Ok(None);
+        }
+
+        data.read_exact(&mut buf[..payload_len]).await?;
 
         S101Frame::from_bytes(&buf[..payload_len]).map(Some)
     }
