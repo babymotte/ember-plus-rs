@@ -1,0 +1,8 @@
+[package]
+name = "ember-plus-rs"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+asn1-rs = "0.7.1"
+thiserror = "2.0.16"

@@ -1,0 +1,471 @@
+/*
+ *  Copyright (C) 2025 Michael Bachmann
+ *
+ *  This program is free software: you can redistribute it and/or modify
+ *  it under the terms of the GNU Affero General Public License as published by
+ *  the Free Software Foundation, either version 3 of the License, or
+ *  (at your option) any later version.
+ *
+ *  This program is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *  GNU Affero General Public License for more details.
+ *
+ *  You should have received a copy of the GNU Affero General Public License
+ *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+use crate::error::{EmberError, EmberResult};
+use std::{io::Read, slice};
+
+pub const BOF: u8 = 0xFE;
+pub const EOF: u8 = 0xFF;
+pub const CE: u8 = 0xFD;
+pub const XOR: u8 = 0x20;
+pub const BOFNE: u8 = 0xF8;
+pub const CRC_SEED: u16 = 0xFFFF;
+pub const CRC_CHECK: u16 = 0xF0B8;
+pub const SLOT_IDENTIFIER: u8 = 0x00;
+pub const MESSAGE_TYPE: u8 = 0x0E;
+pub const COMMAND_EMBER_PACKET: u8 = 0x00;
+pub const COMMAND_KEEPALIVE_REQUEST: u8 = 0x01;
+pub const COMMAND_KEEPALIVE_RESPONSE: u8 = 0x02;
+pub const VERSION: u8 = 0x01;
+pub const FLAG_SINGLE_PACKET: u8 = 0xC0;
+pub const FLAG_MULTI_PACKET_FIRST: u8 = 0x80;
+pub const FLAG_MULTI_PACKET_LAST: u8 = 0x40;
+pub const FLAG_EMPTY_PACKET: u8 = 0x20;
+pub const FLAG_MULTI_PACKET: u8 = 0x00;
+pub const CRC_TABLE: &[u16] = &[
+    0x0000, 0x1189, 0x2312, 0x329b, 0x4624, 0x57ad, 0x6536, 0x74bf, 0x8c48, 0x9dc1, 0xaf5a, 0xbed3,
+    0xca6c, 0xdbe5, 0xe97e, 0xf8f7, 0x1081, 0x0108, 0x3393, 0x221a, 0x56a5, 0x472c, 0x75b7, 0x643e,
+    0x9cc9, 0x8d40, 0xbfdb, 0xae52, 0xdaed, 0xcb64, 0xf9ff, 0xe876, 0x2102, 0x308b, 0x0210, 0x1399,
+    0x6726, 0x76af, 0x4434, 0x55bd, 0xad4a, 0xbcc3, 0x8e58, 0x9fd1, 0xeb6e, 0xfae7, 0xc87c, 0xd9f5,
+    0x3183, 0x200a, 0x1291, 0x0318, 0x77a7, 0x662e, 0x54b5, 0x453c, 0xbdcb, 0xac42, 0x9ed9, 0x8f50,
+    0xfbef, 0xea66, 0xd8fd, 0xc974, 0x4204, 0x538d, 0x6116, 0x709f, 0x0420, 0x15a9, 0x2732, 0x36bb,
+    0xce4c, 0xdfc5, 0xed5e, 0xfcd7, 0x8868, 0x99e1, 0xab7a, 0xbaf3, 0x5285, 0x430c, 0x7197, 0x601e,
+    0x14a1, 0x0528, 0x37b3, 0x263a, 0xdecd, 0xcf44, 0xfddf, 0xec56, 0x98e9, 0x8960, 0xbbfb, 0xaa72,
+    0x6306, 0x728f, 0x4014, 0x519d, 0x2522, 0x34ab, 0x0630, 0x17b9, 0xef4e, 0xfec7, 0xcc5c, 0xddd5,
+    0xa96a, 0xb8e3, 0x8a78, 0x9bf1, 0x7387, 0x620e, 0x5095, 0x411c, 0x35a3, 0x242a, 0x16b1, 0x0738,
+    0xffcf, 0xee46, 0xdcdd, 0xcd54, 0xb9eb, 0xa862, 0x9af9, 0x8b70, 0x8408, 0x9581, 0xa71a, 0xb693,
+    0xc22c, 0xd3a5, 0xe13e, 0xf0b7, 0x0840, 0x19c9, 0x2b52, 0x3adb, 0x4e64, 0x5fed, 0x6d76, 0x7cff,
+    0x9489, 0x8500, 0xb79b, 0xa612, 0xd2ad, 0xc324, 0xf1bf, 0xe036, 0x18c1, 0x0948, 0x3bd3, 0x2a5a,
+    0x5ee5, 0x4f6c, 0x7df7, 0x6c7e, 0xa50a, 0xb483, 0x8618, 0x9791, 0xe32e, 0xf2a7, 0xc03c, 0xd1b5,
+    0x2942, 0x38cb, 0x0a50, 0x1bd9, 0x6f66, 0x7eef, 0x4c74, 0x5dfd, 0xb58b, 0xa402, 0x9699, 0x8710,
+    0xf3af, 0xe226, 0xd0bd, 0xc134, 0x39c3, 0x284a, 0x1ad1, 0x0b58, 0x7fe7, 0x6e6e, 0x5cf5, 0x4d7c,
+    0xc60c, 0xd785, 0xe51e, 0xf497, 0x8028, 0x91a1, 0xa33a, 0xb2b3, 0x4a44, 0x5bcd, 0x6956, 0x78df,
+    0x0c60, 0x1de9, 0x2f72, 0x3efb, 0xd68d, 0xc704, 0xf59f, 0xe416, 0x90a9, 0x8120, 0xb3bb, 0xa232,
+    0x5ac5, 0x4b4c, 0x79d7, 0x685e, 0x1ce1, 0x0d68, 0x3ff3, 0x2e7a, 0xe70e, 0xf687, 0xc41c, 0xd595,
+    0xa12a, 0xb0a3, 0x8238, 0x93b1, 0x6b46, 0x7acf, 0x4854, 0x59dd, 0x2d62, 0x3ceb, 0x0e70, 0x1ff9,
+    0xf78f, 0xe606, 0xd49d, 0xc514, 0xb1ab, 0xa022, 0x92b9, 0x8330, 0x7bc7, 0x6a4e, 0x58d5, 0x495c,
+    0x3de3, 0x2c6a, 0x1ef1, 0x0f78,
+];
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum S101Frame {
+    EmberPacket(EmberPacket),
+    KeepaliveRequest,
+    KeepaliveResponse,
+}
+
+impl S101Frame {
+    pub fn len(&self) -> usize {
+        4 + match self {
+            S101Frame::EmberPacket(ember_packet) => ember_packet.len(),
+            S101Frame::KeepaliveRequest | S101Frame::KeepaliveResponse => 0,
+        }
+    }
+
+    pub fn encode_escaping(&self, data: &mut [u8], out_buffer: &mut Vec<u8>) {
+        self.to_bytes(data);
+        let mut crc = CRC_SEED;
+        out_buffer.push(BOF);
+        for b in data {
+            crc = update_crc(crc, *b);
+            append_escaping(out_buffer, *b);
+        }
+        for b in (!crc).to_le_bytes() {
+            append_escaping(out_buffer, b);
+        }
+        out_buffer.push(EOF);
+    }
+
+    pub fn non_escaping_encoded_len(&self) -> usize {
+        let len = self.len();
+        let len_bytes = if len == 0 {
+            0
+        } else if len <= u8::MAX as usize {
+            1
+        } else if len <= u16::MAX as usize {
+            2
+        } else if len <= u32::MAX as usize {
+            4
+        } else {
+            panic!("max message size exceeded")
+        };
+        2 + len_bytes + len
+    }
+
+    pub fn encode_non_escaping(&self, buf: &mut [u8]) {
+        buf[0] = BOFNE;
+        let payload_len = self.len();
+        if payload_len == 0 {
+            buf[1] = 0x00;
+        } else if payload_len <= u8::MAX as usize {
+            buf[1] = 0x01;
+            buf[2] = payload_len as u8;
+        } else if payload_len <= u16::MAX as usize {
+            buf[1] = 0x02;
+            for (i, b) in (payload_len as u16).to_le_bytes().iter().enumerate() {
+                buf[2 + i] = *b;
+            }
+        } else if payload_len <= u32::MAX as usize {
+            buf[1] = 0x04;
+            for (i, b) in (payload_len as u32).to_le_bytes().iter().enumerate() {
+                buf[2 + i] = *b;
+            }
+        } else {
+            // TODO what is the max message size according to spec?
+            panic!("max message size exceeded")
+        };
+
+        let payload_start = 2 + buf[1] as usize;
+
+        self.to_bytes(&mut buf[payload_start..]);
+    }
+
+    fn to_bytes(&self, buf: &mut [u8]) {
+        if buf.len() < self.len() {
+            panic!("insufficient buffer size")
+        }
+
+        buf[0] = SLOT_IDENTIFIER;
+        buf[1] = MESSAGE_TYPE;
+        buf[2] = self.command_byte();
+        buf[3] = VERSION;
+
+        if let S101Frame::EmberPacket(data) = &self {
+            data.to_bytes(&mut buf[4..]);
+        }
+    }
+
+    fn command_byte(&self) -> u8 {
+        match self {
+            S101Frame::EmberPacket(_) => COMMAND_EMBER_PACKET,
+            S101Frame::KeepaliveRequest => COMMAND_KEEPALIVE_REQUEST,
+            S101Frame::KeepaliveResponse => COMMAND_KEEPALIVE_RESPONSE,
+        }
+    }
+
+    pub fn decode_blocking(mut data: impl Read, buf: &mut [u8]) -> EmberResult<Option<S101Frame>> {
+        data.read_exact(&mut buf[..1])?;
+
+        if buf[0] == BOF {
+            S101Frame::decode_escaping_blocking(data, buf).map(Some)
+        } else if buf[0] == BOFNE {
+            S101Frame::decode_non_escaping_blocking(data, buf)
+        } else {
+            Err(EmberError::Deserialization(format!(
+                "invalid first byte: {:#04x}",
+                buf[0]
+            )))
+        }
+    }
+
+    fn decode_escaping_blocking(mut data: impl Read, buf: &mut [u8]) -> EmberResult<S101Frame> {
+        let mut crc = CRC_SEED;
+        let mut xor = false;
+        let mut b: u8 = 0x00;
+        let mut pos = 0;
+        loop {
+            data.read_exact(slice::from_mut(&mut b))?;
+            if b == BOF {
+                return Err(EmberError::Deserialization("Unexpected BOF".to_owned()));
+            }
+
+            if b == EOF {
+                break;
+            }
+
+            if b == CE {
+                xor = true;
+                continue;
+            }
+
+            if xor {
+                xor = false;
+                b = b ^ XOR;
+            }
+
+            crc = update_crc(crc, b);
+            buf[pos] = b;
+            pos += 1;
+        }
+        if crc != CRC_CHECK {
+            return Err(EmberError::Deserialization(format!(
+                "Invalid CRC: {crc:#06x}"
+            )));
+        }
+
+        // last two bytes were CRC, so we exclude those
+        S101Frame::from_bytes(&buf[..pos - 2])
+    }
+
+    fn decode_non_escaping_blocking(
+        mut data: impl Read,
+        buf: &mut [u8],
+    ) -> EmberResult<Option<S101Frame>> {
+        data.read_exact(&mut buf[..1])?;
+
+        let payload_bytes = buf[0] as usize;
+        if payload_bytes == 0 {
+            return Ok(None);
+        }
+
+        data.read_exact(&mut buf[..payload_bytes])?;
+
+        let mut payload_len = 0usize;
+        for b in &buf[..payload_bytes] {
+            payload_len = payload_len << 8;
+            payload_len += *b as usize;
+        }
+
+        if payload_len == 0 {
+            return Ok(None);
+        }
+
+        data.read_exact(&mut buf[..payload_len])?;
+
+        S101Frame::from_bytes(&buf[..payload_len]).map(Some)
+    }
+
+    fn from_bytes(buf: &[u8]) -> EmberResult<S101Frame> {
+        match buf[2] {
+            COMMAND_EMBER_PACKET => EmberPacket::from_bytes(&buf[4..]).map(S101Frame::EmberPacket),
+            COMMAND_KEEPALIVE_REQUEST => Ok(S101Frame::KeepaliveRequest),
+            COMMAND_KEEPALIVE_RESPONSE => Ok(S101Frame::KeepaliveRequest),
+            it => Err(EmberError::Deserialization(format!(
+                "Invalid command byte: {:#04}",
+                it
+            ))),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct EmberPacket {
+    flags: u8,
+    dtd: u8,
+    app_bytes: u8,
+    glow_version_maj: u8,
+    glow_version_min: u8,
+    payload: Vec<u8>,
+}
+
+impl EmberPacket {
+    pub fn new(glow_version_maj: u8, glow_version_min: u8, payload: Vec<u8>) -> Self {
+        Self {
+            flags: FLAG_EMPTY_PACKET,
+            dtd: 0x01,
+            app_bytes: 0x02,
+            glow_version_maj,
+            glow_version_min,
+            payload,
+        }
+    }
+
+    pub fn set_empty(&mut self) {
+        self.flags = FLAG_EMPTY_PACKET;
+    }
+
+    pub fn set_single(&mut self) {
+        self.flags = FLAG_SINGLE_PACKET;
+    }
+
+    pub fn set_multi_first(&mut self) {
+        self.flags = FLAG_MULTI_PACKET_FIRST;
+    }
+
+    pub fn set_multi(&mut self) {
+        self.flags = FLAG_MULTI_PACKET;
+    }
+
+    pub fn set_multi_last(&mut self) {
+        self.flags = FLAG_MULTI_PACKET_LAST;
+    }
+
+    pub fn set_glow_dtd_version(&mut self, major: u8, minor: u8) {
+        self.glow_version_maj = major;
+        self.glow_version_min = minor;
+    }
+
+    pub fn payload(&self) -> &[u8] {
+        &self.payload
+    }
+
+    pub fn payload_mut(&mut self) -> &mut [u8] {
+        &mut self.payload
+    }
+
+    pub fn len(&self) -> usize {
+        self.payload.len() + 3 + self.app_bytes as usize
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.flags == FLAG_EMPTY_PACKET
+    }
+
+    fn to_bytes(&self, buf: &mut [u8]) {
+        if buf.len() < self.len() {
+            panic!("insufficient buffer size")
+        }
+
+        buf[0] = self.flags;
+        buf[1] = self.dtd;
+        buf[2] = self.app_bytes;
+        buf[3] = self.glow_version_min;
+        buf[4] = self.glow_version_maj;
+        (&mut buf[5..]).copy_from_slice(&self.payload);
+    }
+
+    fn from_bytes(buf: &[u8]) -> EmberResult<Self> {
+        if buf.len() <= 5 {
+            return Err(EmberError::Deserialization(format!(
+                "Invalid payload length {} (minimum is 6)",
+                buf.len()
+            )));
+        }
+        Ok(Self {
+            flags: buf[0],
+            dtd: buf[1],
+            app_bytes: buf[2],
+            glow_version_min: buf[3],
+            glow_version_maj: buf[4],
+            payload: buf[5..].to_vec(),
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum S101Packet<'a> {
+    Escaping(&'a [u8]),
+    NonEscaping(&'a [u8]),
+}
+
+#[derive(Debug, Clone)]
+pub enum OwnedS101Packet {
+    Escaping(Vec<u8>),
+    NonEscaping(Vec<u8>),
+}
+
+impl OwnedS101Packet {
+    pub fn as_ref<'a>(&'a self) -> S101Packet<'a> {
+        self.into()
+    }
+}
+
+impl<'a> From<S101Packet<'a>> for OwnedS101Packet {
+    fn from(value: S101Packet<'a>) -> Self {
+        match value {
+            S101Packet::Escaping(items) => OwnedS101Packet::Escaping(items.to_vec().into()),
+            S101Packet::NonEscaping(items) => OwnedS101Packet::NonEscaping(items.to_vec().into()),
+        }
+    }
+}
+
+impl<'a> From<&'a OwnedS101Packet> for S101Packet<'a> {
+    fn from(value: &'a OwnedS101Packet) -> Self {
+        match value {
+            OwnedS101Packet::Escaping(items) => S101Packet::Escaping(items),
+            OwnedS101Packet::NonEscaping(items) => S101Packet::NonEscaping(items),
+        }
+    }
+}
+
+fn update_crc(crc: u16, b: u8) -> u16 {
+    (crc >> 8) ^ CRC_TABLE[(crc ^ (b as u16)) as u8 as usize]
+}
+
+fn append_escaping(buf: &mut Vec<u8>, b: u8) {
+    if b < BOFNE {
+        buf.push(b);
+    } else {
+        buf.push(CE);
+        buf.push(b ^ XOR);
+    }
+}
+
+#[cfg(test)]
+mod test {
+
+    use std::io::Cursor;
+
+    use super::*;
+
+    #[test]
+    fn escaping_encoding_works() {
+        let mut packet = EmberPacket::new(2, 5, vec![0; 10]);
+        packet.set_single();
+        let frame = S101Frame::EmberPacket(packet);
+        let mut output = Vec::new();
+        let mut temp = vec![0u8; frame.len()];
+        frame.encode_escaping(&mut temp, &mut output);
+        assert_eq!(
+            vec![
+                254, 0, 14, 0, 1, 192, 1, 2, 5, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 107, 240, 255
+            ],
+            output
+        );
+    }
+
+    #[test]
+    fn non_escaping_encoding_works() {
+        let mut packet = EmberPacket::new(2, 5, vec![0; 10]);
+        packet.set_single();
+        let frame = S101Frame::EmberPacket(packet);
+        let mut output = vec![0; frame.non_escaping_encoded_len()];
+        frame.encode_non_escaping(&mut output);
+        assert_eq!(
+            vec![
+                0xF8, 0x01, 0x13, 0x00, 0x0E, 0x00, 0x01, 0xC0, 0x01, 0x02, 0x05, 0x02, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            ],
+            output
+        );
+    }
+
+    #[test]
+    fn escaping_decoding_works() {
+        let data = vec![
+            254, 0, 14, 0, 1, 192, 1, 2, 5, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 107, 240, 255,
+        ];
+        let mut packet = EmberPacket::new(2, 5, vec![0; 10]);
+        packet.set_single();
+        let frame = S101Frame::EmberPacket(packet);
+        let mut buf = vec![0; data.len()];
+        assert_eq!(
+            frame,
+            S101Frame::decode_blocking(Cursor::new(&data), &mut buf)
+                .unwrap()
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn non_escaping_decoding_works() {
+        let data = vec![
+            0xF8, 0x01, 0x13, 0x00, 0x0E, 0x00, 0x01, 0xC0, 0x01, 0x02, 0x05, 0x02, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ];
+        let mut packet = EmberPacket::new(2, 5, vec![0; 10]);
+        packet.set_single();
+        let frame = S101Frame::EmberPacket(packet);
+        let mut buf = vec![0; data.len()];
+        assert_eq!(
+            frame,
+            S101Frame::decode_blocking(Cursor::new(&data), &mut buf)
+                .unwrap()
+                .unwrap()
+        );
+    }
+}
