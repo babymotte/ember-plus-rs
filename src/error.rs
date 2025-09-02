@@ -25,6 +25,8 @@ pub enum EmberError {
     Deserialization(String),
     #[error("I/O error: {0}")]
     Io(#[from] io::Error),
+    #[error("Connection error: {0}")]
+    Connection(String),
 }
 
 pub type EmberResult<T> = Result<T, EmberError>;

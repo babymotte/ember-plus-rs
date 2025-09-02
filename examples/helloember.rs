@@ -15,15 +15,20 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use ember_plus_rs::{consumer::start_consumer, error::EmberResult};
+use ember_plus_rs::{consumer::start_tcp_consumer, error::EmberResult};
+use std::time::Duration;
 use tracing::info;
 
 #[tokio::main]
 async fn main() -> EmberResult<()> {
     tracing_subscriber::fmt().init();
 
-    let (tx, mut rx) =
-        start_consumer("127.0.0.1:9000".parse().expect("malformed socket address")).await?;
+    let (tx, mut rx) = start_tcp_consumer(
+        "127.0.0.1:9000".parse().expect("malformed socket address"),
+        Some(Duration::from_secs(3)),
+        true,
+    )
+    .await?;
 
     while let Some(packet) = rx.recv().await {
         info!("Received {packet:?}");

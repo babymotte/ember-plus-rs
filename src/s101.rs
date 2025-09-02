@@ -64,34 +64,257 @@ pub const CRC_TABLE: &[u16] = &[
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum S101Frame {
+    Escaping(EscapingS101Frame),
+    NonEscaping(NonEscapingS101Frame),
+}
+
+impl S101Frame {
+    pub fn decode_blocking(mut data: impl Read, buf: &mut [u8]) -> EmberResult<Option<S101Frame>> {
+        data.read_exact(&mut buf[..1])?;
+
+        if buf[0] == BOF {
+            EscapingS101Frame::decode_blocking(data, buf)
+                .map(Self::Escaping)
+                .map(Some)
+        } else if buf[0] == BOFNE {
+            NonEscapingS101Frame::decode_blocking(data, buf).map(|it| it.map(Self::NonEscaping))
+        } else {
+            Err(EmberError::Deserialization(format!(
+                "invalid first byte: {:#04x}",
+                buf[0]
+            )))
+        }
+    }
+
+    pub async fn decode<R: AsyncRead + Unpin>(
+        mut data: R,
+        buf: &mut [u8],
+    ) -> EmberResult<Option<S101Frame>> {
+        data.read_exact(&mut buf[..1]).await?;
+
+        if buf[0] == BOF {
+            EscapingS101Frame::decode(data, buf)
+                .await
+                .map(Self::Escaping)
+                .map(Some)
+        } else if buf[0] == BOFNE {
+            NonEscapingS101Frame::decode(data, buf)
+                .await
+                .map(|it| it.map(Self::NonEscaping))
+        } else {
+            Err(EmberError::Deserialization(format!(
+                "invalid first byte: {:#04x}",
+                buf[0]
+            )))
+        }
+    }
+
+    pub(crate) fn encode<'a>(
+        &self,
+        encode_buf: &'a mut [u8],
+        out_buf: &'a mut Vec<u8>,
+    ) -> &'a [u8] {
+        match self {
+            S101Frame::Escaping(frame) => {
+                frame.encode(encode_buf, out_buf);
+                out_buf
+            }
+            S101Frame::NonEscaping(frame) => {
+                frame.encode(encode_buf);
+                &encode_buf[..frame.encoded_len()]
+            }
+        }
+    }
+
+    pub(crate) fn is_non_escaping(&self) -> bool {
+        match self {
+            S101Frame::Escaping(_) => false,
+            S101Frame::NonEscaping(_) => true,
+        }
+    }
+
+    pub(crate) fn is_keepalive_request(&self) -> bool {
+        match self {
+            S101Frame::Escaping(EscapingS101Frame::KeepaliveRequest)
+            | S101Frame::NonEscaping(NonEscapingS101Frame::KeepaliveRequest) => true,
+            _ => false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum EscapingS101Frame {
     EmberPacket(EmberPacket),
     KeepaliveRequest,
     KeepaliveResponse,
 }
 
-impl S101Frame {
+impl EscapingS101Frame {
     pub fn len(&self) -> usize {
         4 + match self {
-            S101Frame::EmberPacket(ember_packet) => ember_packet.len(),
-            S101Frame::KeepaliveRequest | S101Frame::KeepaliveResponse => 0,
+            Self::EmberPacket(ember_packet) => ember_packet.len(),
+            Self::KeepaliveRequest | Self::KeepaliveResponse => 0,
         }
     }
 
-    pub fn encode_escaping(&self, data: &mut [u8], out_buffer: &mut Vec<u8>) {
-        self.to_bytes(data);
+    pub fn encode(&self, encode_buf: &mut [u8], out_buf: &mut Vec<u8>) {
+        self.to_bytes(encode_buf);
         let mut crc = CRC_SEED;
-        out_buffer.push(BOF);
-        for b in &data[..self.len()] {
-            crc = update_crc(crc, *b);
-            append_escaping(out_buffer, *b);
+        out_buf.push(BOF);
+        for b in &encode_buf[..self.len()] {
+            crc = Self::update_crc(crc, *b);
+            Self::append_escaping(out_buf, *b);
         }
         for b in (!crc).to_le_bytes() {
-            append_escaping(out_buffer, b);
+            Self::append_escaping(out_buf, b);
         }
-        out_buffer.push(EOF);
+        out_buf.push(EOF);
     }
 
-    pub fn non_escaping_encoded_len(&self) -> usize {
+    fn to_bytes(&self, buf: &mut [u8]) {
+        if buf.len() < self.len() {
+            panic!("insufficient buffer size")
+        }
+
+        buf[0] = SLOT_IDENTIFIER;
+        buf[1] = MESSAGE_TYPE;
+        buf[2] = self.command_byte();
+        buf[3] = VERSION;
+
+        if let Self::EmberPacket(data) = &self {
+            data.to_bytes(&mut buf[4..self.len()]);
+        }
+    }
+
+    fn command_byte(&self) -> u8 {
+        match self {
+            Self::EmberPacket(_) => COMMAND_EMBER_PACKET,
+            Self::KeepaliveRequest => COMMAND_KEEPALIVE_REQUEST,
+            Self::KeepaliveResponse => COMMAND_KEEPALIVE_RESPONSE,
+        }
+    }
+
+    fn decode_blocking(mut data: impl Read, buf: &mut [u8]) -> EmberResult<Self> {
+        let mut crc = CRC_SEED;
+        let mut xor = false;
+        let mut b: u8 = 0x00;
+        let mut pos = 0;
+        loop {
+            data.read_exact(slice::from_mut(&mut b))?;
+            if b == BOF {
+                return Err(EmberError::Deserialization("Unexpected BOF".to_owned()));
+            }
+
+            if b == EOF {
+                break;
+            }
+
+            if b == CE {
+                xor = true;
+                continue;
+            }
+
+            if xor {
+                xor = false;
+                b = b ^ XOR;
+            }
+
+            crc = Self::update_crc(crc, b);
+            buf[pos] = b;
+            pos += 1;
+        }
+        if crc != CRC_CHECK {
+            return Err(EmberError::Deserialization(format!(
+                "Invalid CRC: {crc:#06x}"
+            )));
+        }
+
+        Self::from_bytes(&buf[..pos])
+    }
+
+    async fn decode<R: AsyncRead + Unpin>(mut data: R, buf: &mut [u8]) -> EmberResult<Self> {
+        let mut crc = CRC_SEED;
+        let mut xor = false;
+        let mut b: u8 = 0x00;
+        let mut pos = 0;
+        loop {
+            data.read_exact(slice::from_mut(&mut b)).await?;
+            if b == BOF {
+                return Err(EmberError::Deserialization("Unexpected BOF".to_owned()));
+            }
+
+            if b == EOF {
+                break;
+            }
+
+            if b == CE {
+                xor = true;
+                continue;
+            }
+
+            if xor {
+                xor = false;
+                b = b ^ XOR;
+            }
+
+            crc = EscapingS101Frame::update_crc(crc, b);
+            buf[pos] = b;
+            pos += 1;
+        }
+        if crc != CRC_CHECK {
+            return Err(EmberError::Deserialization(format!(
+                "Invalid CRC: {crc:#06x}"
+            )));
+        }
+
+        Self::from_bytes(&buf[..pos])
+    }
+
+    fn from_bytes(buf: &[u8]) -> EmberResult<EscapingS101Frame> {
+        match buf[2] {
+            COMMAND_EMBER_PACKET => {
+                // the last two bytes are CRC
+                EmberPacket::from_bytes(&buf[4..buf.len() - 2]).map(EscapingS101Frame::EmberPacket)
+            }
+            COMMAND_KEEPALIVE_REQUEST => Ok(EscapingS101Frame::KeepaliveRequest),
+            COMMAND_KEEPALIVE_RESPONSE => Ok(EscapingS101Frame::KeepaliveRequest),
+            it => Err(EmberError::Deserialization(format!(
+                "Invalid command byte: {:#04x}",
+                it
+            ))),
+        }
+    }
+
+    fn update_crc(crc: u16, b: u8) -> u16 {
+        (crc >> 8) ^ CRC_TABLE[(crc ^ (b as u16)) as u8 as usize]
+    }
+
+    fn append_escaping(buf: &mut Vec<u8>, b: u8) {
+        if b < BOFNE {
+            buf.push(b);
+        } else {
+            buf.push(CE);
+            buf.push(b ^ XOR);
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum NonEscapingS101Frame {
+    EmberPacket(EmberPacket),
+    KeepaliveRequest,
+    KeepaliveResponse,
+}
+
+impl NonEscapingS101Frame {
+    pub fn len(&self) -> usize {
+        4 + match self {
+            Self::EmberPacket(ember_packet) => ember_packet.len(),
+            Self::KeepaliveRequest | Self::KeepaliveResponse => 0,
+        }
+    }
+
+    pub fn encoded_len(&self) -> usize {
         let len = self.len();
         let len_bytes = if len == 0 {
             0
@@ -107,7 +330,7 @@ impl S101Frame {
         2 + len_bytes + len
     }
 
-    pub fn encode_non_escaping(&self, buf: &mut [u8]) {
+    pub fn encode(&self, buf: &mut [u8]) {
         buf[0] = BOFNE;
         let payload_len = self.len();
         if payload_len == 0 {
@@ -145,137 +368,20 @@ impl S101Frame {
         buf[2] = self.command_byte();
         buf[3] = VERSION;
 
-        if let S101Frame::EmberPacket(data) = &self {
+        if let Self::EmberPacket(data) = &self {
             data.to_bytes(&mut buf[4..self.len()]);
         }
     }
 
     fn command_byte(&self) -> u8 {
         match self {
-            S101Frame::EmberPacket(_) => COMMAND_EMBER_PACKET,
-            S101Frame::KeepaliveRequest => COMMAND_KEEPALIVE_REQUEST,
-            S101Frame::KeepaliveResponse => COMMAND_KEEPALIVE_RESPONSE,
+            Self::EmberPacket(_) => COMMAND_EMBER_PACKET,
+            Self::KeepaliveRequest => COMMAND_KEEPALIVE_REQUEST,
+            Self::KeepaliveResponse => COMMAND_KEEPALIVE_RESPONSE,
         }
     }
 
-    pub fn decode_blocking(mut data: impl Read, buf: &mut [u8]) -> EmberResult<Option<S101Frame>> {
-        data.read_exact(&mut buf[..1])?;
-
-        if buf[0] == BOF {
-            S101Frame::decode_escaping_blocking(data, buf).map(Some)
-        } else if buf[0] == BOFNE {
-            S101Frame::decode_non_escaping_blocking(data, buf)
-        } else {
-            Err(EmberError::Deserialization(format!(
-                "invalid first byte: {:#04x}",
-                buf[0]
-            )))
-        }
-    }
-
-    pub async fn decode(
-        mut data: impl AsyncRead + Unpin,
-        buf: &mut [u8],
-    ) -> EmberResult<Option<S101Frame>> {
-        data.read_exact(&mut buf[..1]).await?;
-
-        if buf[0] == BOF {
-            S101Frame::decode_escaping(data, buf).await.map(Some)
-        } else if buf[0] == BOFNE {
-            S101Frame::decode_non_escaping(data, buf).await
-        } else {
-            Err(EmberError::Deserialization(format!(
-                "invalid first byte: {:#04x}",
-                buf[0]
-            )))
-        }
-    }
-
-    fn decode_escaping_blocking(mut data: impl Read, buf: &mut [u8]) -> EmberResult<S101Frame> {
-        let mut crc = CRC_SEED;
-        let mut xor = false;
-        let mut b: u8 = 0x00;
-        let mut pos = 0;
-        loop {
-            data.read_exact(slice::from_mut(&mut b))?;
-            if b == BOF {
-                return Err(EmberError::Deserialization("Unexpected BOF".to_owned()));
-            }
-
-            if b == EOF {
-                break;
-            }
-
-            if b == CE {
-                xor = true;
-                continue;
-            }
-
-            if xor {
-                xor = false;
-                b = b ^ XOR;
-            }
-
-            crc = update_crc(crc, b);
-            buf[pos] = b;
-            pos += 1;
-        }
-        if crc != CRC_CHECK {
-            return Err(EmberError::Deserialization(format!(
-                "Invalid CRC: {crc:#06x}"
-            )));
-        }
-
-        // last two bytes were CRC, so we exclude those
-        S101Frame::from_bytes(&buf[..pos - 2])
-    }
-
-    async fn decode_escaping(
-        mut data: impl AsyncRead + Unpin,
-        buf: &mut [u8],
-    ) -> EmberResult<S101Frame> {
-        let mut crc = CRC_SEED;
-        let mut xor = false;
-        let mut b: u8 = 0x00;
-        let mut pos = 0;
-        loop {
-            data.read_exact(slice::from_mut(&mut b)).await?;
-            if b == BOF {
-                return Err(EmberError::Deserialization("Unexpected BOF".to_owned()));
-            }
-
-            if b == EOF {
-                break;
-            }
-
-            if b == CE {
-                xor = true;
-                continue;
-            }
-
-            if xor {
-                xor = false;
-                b = b ^ XOR;
-            }
-
-            crc = update_crc(crc, b);
-            buf[pos] = b;
-            pos += 1;
-        }
-        if crc != CRC_CHECK {
-            return Err(EmberError::Deserialization(format!(
-                "Invalid CRC: {crc:#06x}"
-            )));
-        }
-
-        // last two bytes were CRC, so we exclude those
-        S101Frame::from_bytes(&buf[..pos - 2])
-    }
-
-    fn decode_non_escaping_blocking(
-        mut data: impl Read,
-        buf: &mut [u8],
-    ) -> EmberResult<Option<S101Frame>> {
+    fn decode_blocking(mut data: impl Read, buf: &mut [u8]) -> EmberResult<Option<Self>> {
         data.read_exact(&mut buf[..1])?;
 
         let payload_bytes = buf[0] as usize;
@@ -297,13 +403,13 @@ impl S101Frame {
 
         data.read_exact(&mut buf[..payload_len])?;
 
-        S101Frame::from_bytes(&buf[..payload_len]).map(Some)
+        Self::from_bytes(&buf[..payload_len]).map(Some)
     }
 
-    async fn decode_non_escaping(
-        mut data: impl AsyncRead + Unpin,
+    async fn decode<R: AsyncRead + Unpin>(
+        mut data: R,
         buf: &mut [u8],
-    ) -> EmberResult<Option<S101Frame>> {
+    ) -> EmberResult<Option<Self>> {
         data.read_exact(&mut buf[..1]).await?;
 
         let payload_bytes = buf[0] as usize;
@@ -325,14 +431,14 @@ impl S101Frame {
 
         data.read_exact(&mut buf[..payload_len]).await?;
 
-        S101Frame::from_bytes(&buf[..payload_len]).map(Some)
+        Self::from_bytes(&buf[..payload_len]).map(Some)
     }
 
-    fn from_bytes(buf: &[u8]) -> EmberResult<S101Frame> {
+    fn from_bytes(buf: &[u8]) -> EmberResult<Self> {
         match buf[2] {
-            COMMAND_EMBER_PACKET => EmberPacket::from_bytes(&buf[4..]).map(S101Frame::EmberPacket),
-            COMMAND_KEEPALIVE_REQUEST => Ok(S101Frame::KeepaliveRequest),
-            COMMAND_KEEPALIVE_RESPONSE => Ok(S101Frame::KeepaliveRequest),
+            COMMAND_EMBER_PACKET => EmberPacket::from_bytes(&buf[4..]).map(Self::EmberPacket),
+            COMMAND_KEEPALIVE_REQUEST => Ok(Self::KeepaliveRequest),
+            COMMAND_KEEPALIVE_RESPONSE => Ok(Self::KeepaliveRequest),
             it => Err(EmberError::Deserialization(format!(
                 "Invalid command byte: {:#04x}",
                 it
@@ -435,55 +541,6 @@ impl EmberPacket {
     }
 }
 
-#[derive(Debug, Clone)]
-pub enum S101Packet<'a> {
-    Escaping(&'a [u8]),
-    NonEscaping(&'a [u8]),
-}
-
-#[derive(Debug, Clone)]
-pub enum OwnedS101Packet {
-    Escaping(Vec<u8>),
-    NonEscaping(Vec<u8>),
-}
-
-impl OwnedS101Packet {
-    pub fn as_ref<'a>(&'a self) -> S101Packet<'a> {
-        self.into()
-    }
-}
-
-impl<'a> From<S101Packet<'a>> for OwnedS101Packet {
-    fn from(value: S101Packet<'a>) -> Self {
-        match value {
-            S101Packet::Escaping(items) => OwnedS101Packet::Escaping(items.to_vec().into()),
-            S101Packet::NonEscaping(items) => OwnedS101Packet::NonEscaping(items.to_vec().into()),
-        }
-    }
-}
-
-impl<'a> From<&'a OwnedS101Packet> for S101Packet<'a> {
-    fn from(value: &'a OwnedS101Packet) -> Self {
-        match value {
-            OwnedS101Packet::Escaping(items) => S101Packet::Escaping(items),
-            OwnedS101Packet::NonEscaping(items) => S101Packet::NonEscaping(items),
-        }
-    }
-}
-
-fn update_crc(crc: u16, b: u8) -> u16 {
-    (crc >> 8) ^ CRC_TABLE[(crc ^ (b as u16)) as u8 as usize]
-}
-
-fn append_escaping(buf: &mut Vec<u8>, b: u8) {
-    if b < BOFNE {
-        buf.push(b);
-    } else {
-        buf.push(CE);
-        buf.push(b ^ XOR);
-    }
-}
-
 #[cfg(test)]
 mod test {
 
@@ -495,10 +552,10 @@ mod test {
     fn escaping_encoding_works() {
         let mut packet = EmberPacket::new(2, 5, vec![0; 10]);
         packet.set_single();
-        let frame = S101Frame::EmberPacket(packet);
+        let frame = EscapingS101Frame::EmberPacket(packet);
         let mut output = Vec::new();
         let mut temp = vec![0u8; 2 * frame.len()];
-        frame.encode_escaping(&mut temp, &mut output);
+        frame.encode(&mut temp, &mut output);
         assert_eq!(
             vec![
                 254, 0, 14, 0, 1, 192, 1, 2, 5, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 107, 240, 255
@@ -511,15 +568,15 @@ mod test {
     fn non_escaping_encoding_works() {
         let mut packet = EmberPacket::new(2, 5, vec![0; 10]);
         packet.set_single();
-        let frame = S101Frame::EmberPacket(packet);
-        let mut output = vec![0; 2 * frame.non_escaping_encoded_len()];
-        frame.encode_non_escaping(&mut output);
+        let frame = NonEscapingS101Frame::EmberPacket(packet);
+        let mut output = vec![0; 2 * frame.encoded_len()];
+        frame.encode(&mut output);
         assert_eq!(
             vec![
                 0xF8, 0x01, 0x13, 0x00, 0x0E, 0x00, 0x01, 0xC0, 0x01, 0x02, 0x05, 0x02, 0x00, 0x00,
                 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             ],
-            &output[..frame.non_escaping_encoded_len()]
+            &output[..frame.encoded_len()]
         );
     }
 
@@ -530,10 +587,10 @@ mod test {
         ];
         let mut packet = EmberPacket::new(2, 5, vec![0; 10]);
         packet.set_single();
-        let frame = S101Frame::EmberPacket(packet);
+        let frame = EscapingS101Frame::EmberPacket(packet);
         let mut buf = vec![0; data.len()];
         assert_eq!(
-            frame,
+            S101Frame::Escaping(frame),
             S101Frame::decode_blocking(Cursor::new(&data), &mut buf)
                 .unwrap()
                 .unwrap()
@@ -548,10 +605,10 @@ mod test {
         ];
         let mut packet = EmberPacket::new(2, 5, vec![0; 10]);
         packet.set_single();
-        let frame = S101Frame::EmberPacket(packet);
+        let frame = NonEscapingS101Frame::EmberPacket(packet);
         let mut buf = vec![0; data.len()];
         assert_eq!(
-            frame,
+            S101Frame::NonEscaping(frame),
             S101Frame::decode_blocking(Cursor::new(&data), &mut buf)
                 .unwrap()
                 .unwrap()
