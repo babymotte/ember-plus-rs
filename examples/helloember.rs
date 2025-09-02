@@ -15,6 +15,19 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-fn main() {
-    eprintln!("hello");
+use ember_plus_rs::{consumer::start_consumer, error::EmberResult};
+use tracing::info;
+
+#[tokio::main]
+async fn main() -> EmberResult<()> {
+    tracing_subscriber::fmt().init();
+
+    let (tx, mut rx) =
+        start_consumer("127.0.0.1:9000".parse().expect("malformed socket address")).await?;
+
+    while let Some(packet) = rx.recv().await {
+        info!("Received {packet:?}");
+    }
+
+    Ok(())
 }

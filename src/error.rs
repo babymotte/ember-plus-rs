@@ -15,10 +15,11 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+use miette::Diagnostic;
 use std::io;
 use thiserror::Error;
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, Diagnostic)]
 pub enum EmberError {
     #[error("Deserialization error: {0}")]
     Deserialization(String),

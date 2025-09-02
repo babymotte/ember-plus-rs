@@ -81,7 +81,7 @@ impl S101Frame {
         self.to_bytes(data);
         let mut crc = CRC_SEED;
         out_buffer.push(BOF);
-        for b in data {
+        for b in &data[..self.len()] {
             crc = update_crc(crc, *b);
             append_escaping(out_buffer, *b);
         }
@@ -146,7 +146,7 @@ impl S101Frame {
         buf[3] = VERSION;
 
         if let S101Frame::EmberPacket(data) = &self {
-            data.to_bytes(&mut buf[4..]);
+            data.to_bytes(&mut buf[4..self.len()]);
         }
     }
 
@@ -334,7 +334,7 @@ impl S101Frame {
             COMMAND_KEEPALIVE_REQUEST => Ok(S101Frame::KeepaliveRequest),
             COMMAND_KEEPALIVE_RESPONSE => Ok(S101Frame::KeepaliveRequest),
             it => Err(EmberError::Deserialization(format!(
-                "Invalid command byte: {:#04}",
+                "Invalid command byte: {:#04x}",
                 it
             ))),
         }
@@ -497,7 +497,7 @@ mod test {
         packet.set_single();
         let frame = S101Frame::EmberPacket(packet);
         let mut output = Vec::new();
-        let mut temp = vec![0u8; frame.len()];
+        let mut temp = vec![0u8; 2 * frame.len()];
         frame.encode_escaping(&mut temp, &mut output);
         assert_eq!(
             vec![
@@ -512,14 +512,14 @@ mod test {
         let mut packet = EmberPacket::new(2, 5, vec![0; 10]);
         packet.set_single();
         let frame = S101Frame::EmberPacket(packet);
-        let mut output = vec![0; frame.non_escaping_encoded_len()];
+        let mut output = vec![0; 2 * frame.non_escaping_encoded_len()];
         frame.encode_non_escaping(&mut output);
         assert_eq!(
             vec![
                 0xF8, 0x01, 0x13, 0x00, 0x0E, 0x00, 0x01, 0xC0, 0x01, 0x02, 0x05, 0x02, 0x00, 0x00,
                 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             ],
-            output
+            &output[..frame.non_escaping_encoded_len()]
         );
     }
 
