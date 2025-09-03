@@ -16,7 +16,6 @@
  */
 
 use ember_plus_rs::{consumer::start_tcp_consumer, error::EmberResult};
-use std::time::Duration;
 use tracing::info;
 
 #[tokio::main]
@@ -25,8 +24,8 @@ async fn main() -> EmberResult<()> {
 
     let (tx, mut rx) = start_tcp_consumer(
         "127.0.0.1:9000".parse().expect("malformed socket address"),
-        Some(Duration::from_secs(3)),
-        true,
+        None,
+        false,
     )
     .await?;
 

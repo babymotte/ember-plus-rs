@@ -15,33 +15,26 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-// restrictions:
-// - indefinite length only for containers
-// - inner and outer tags must use same length form
-// - only "set" and "sequence" containers
-// - document root must be a single container
+use asn1_rs::Tag;
 
-use std::collections::HashSet;
+pub mod command;
+pub mod element;
+pub mod function;
+pub mod matrix;
+pub mod node;
+pub mod parameter;
+pub mod primitives;
+pub mod root;
+pub mod streams;
+pub mod template;
 
-#[derive(Debug, Clone)]
-pub enum EmBerObject {
-    Container(EmBerContainer),
-    Value(EmBerValue),
+pub enum TagClass {
+    Universal = 0x00,
+    Application = 0x40,
+    Context = 0x80,
+    Private = 0xC0,
 }
 
-#[derive(Debug, Clone)]
-pub enum EmBerContainer {
-    Set(HashSet<EmBerObject>),
-    Sequence(Vec<EmBerObject>),
-}
-
-#[derive(Debug, Clone)]
-pub enum EmBerValue {
-    Boolean(bool),
-    Integer(i64),
-    Real(f64),
-    Utf8String(String),
-    OctetString(Box<[u8]>),
-    Null,
-    RelativeObjectIdentifier,
+pub const fn tag(class: TagClass, number: u8) -> Tag {
+    Tag((class as u32) << 8 + number as u32)
 }
