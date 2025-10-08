@@ -14,3 +14,112 @@
  *  You should have received a copy of the GNU Affero General Public License
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
+
+use crate::{com::ember_server_channel, ember::EmberPacket, error::EmberResult};
+use std::{io, net::SocketAddr, time::Duration};
+use tokio::{net::TcpListener, select, spawn, sync::mpsc};
+use tokio_util::sync::CancellationToken;
+use tracing::{error, info};
+
+pub trait ClientHandler: Clone + Send + Sync + 'static {
+    fn handle_client(
+        &self,
+        tx: mpsc::Sender<EmberPacket>,
+        rx: mpsc::Receiver<EmberPacket>,
+    ) -> impl Future<Output = EmberResult<()>> + Send;
+}
+
+pub async fn start_tcp_provider(
+    local_addr: SocketAddr,
+    keepalive: Option<Duration>,
+    use_non_escaping: bool,
+    client_handler: impl ClientHandler,
+    cancellation_token: CancellationToken,
+) -> EmberResult<()> {
+    info!("Starting provider at {local_addr} …");
+
+    // TODO set up socket correctly
+    let socket = TcpListener::bind(local_addr).await?;
+
+    spawn(accept_clients(
+        keepalive,
+        use_non_escaping,
+        client_handler,
+        cancellation_token,
+        socket,
+    ));
+
+    Ok(())
+}
+
+async fn accept_clients(
+    keepalive: Option<Duration>,
+    use_non_escaping: bool,
+    client_handler: impl ClientHandler,
+    cancellation_token: CancellationToken,
+    socket: TcpListener,
+) {
+    loop {
+        select! {
+            client = socket.accept() => {
+                let client_handler = client_handler.clone();
+                if !client_accepted(client, keepalive, use_non_escaping, client_handler).await {
+                break;
+            }
+            },
+            _ = cancellation_token.cancelled() => {
+                info!("Received stop signal.");
+                break;
+            },
+        }
+    }
+}
+
+async fn client_accepted(
+    client: io::Result<(tokio::net::TcpStream, SocketAddr)>,
+    keepalive: Option<Duration>,
+    use_non_escaping: bool,
+    client_handler: impl ClientHandler,
+) -> bool {
+    match client {
+        Ok((client, addr)) => {
+            client_connected(keepalive, use_non_escaping, client_handler, client, addr).await;
+        }
+        Err(e) => {
+            error!("Erro accpting client connection: {e}");
+            return false;
+        }
+    }
+    true
+}
+
+async fn client_connected(
+    keepalive: Option<Duration>,
+    use_non_escaping: bool,
+    client_handler: impl ClientHandler,
+    client: tokio::net::TcpStream,
+    addr: SocketAddr,
+) {
+    info!("New client connected: {addr}");
+    match ember_server_channel(keepalive, client, use_non_escaping).await {
+        Ok((ember_tx, ember_rx)) => {
+            serve(client_handler, addr, ember_tx, ember_rx).await;
+        }
+        Err(e) => {
+            error!("Error establishing ember+ communication with client {addr}: {e}");
+        }
+    }
+}
+
+async fn serve(
+    client_handler: impl ClientHandler,
+    addr: SocketAddr,
+    ember_tx: mpsc::Sender<EmberPacket>,
+    ember_rx: mpsc::Receiver<EmberPacket>,
+) {
+    spawn(async move {
+        if let Err(e) = client_handler.handle_client(ember_tx, ember_rx).await {
+            error!("Client connection {addr} closed unexpectedly: {e}");
+        }
+    });
+}

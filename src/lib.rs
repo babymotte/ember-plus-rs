@@ -15,9 +15,11 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+pub mod com;
 pub mod consumer;
 pub mod ember;
 pub mod error;
 pub mod glow;
 pub mod provider;
 pub mod s101;
+pub mod utils;

@@ -16,6 +16,7 @@
  */
 
 use miette::Diagnostic;
+use rasn::error::EncodeError;
 use std::io;
 use thiserror::Error;
 
@@ -27,6 +28,10 @@ pub enum EmberError {
     Io(#[from] io::Error),
     #[error("Connection error: {0}")]
     Connection(String),
+    #[error("S101 Decoder error")]
+    S101DecodeError,
+    #[error("ASN.1 encode error: {0}")]
+    EncodeError(#[from] EncodeError),
 }
 
 pub type EmberResult<T> = Result<T, EmberError>;

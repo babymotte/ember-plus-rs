@@ -15,8 +15,14 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use ember_plus_rs::{consumer::start_tcp_consumer, error::EmberResult};
-use tracing::info;
+use ember_plus_rs::{
+    consumer::start_tcp_consumer,
+    ember::EmberPacket,
+    error::EmberResult,
+    glow::{Command, FieldFlags, Root},
+};
+use rasn::ber;
+use tracing::{error, info};
 
 #[tokio::main]
 async fn main() -> EmberResult<()> {
@@ -24,13 +30,28 @@ async fn main() -> EmberResult<()> {
 
     let (tx, mut rx) = start_tcp_consumer(
         "127.0.0.1:9000".parse().expect("malformed socket address"),
+        // Some(Duration::from_secs(1)),
         None,
         false,
     )
     .await?;
 
+    tx.send(EmberPacket::try_from(Root::from(Command::get_directory(
+        Some(FieldFlags::All),
+    )))?)
+    .await
+    .ok();
+
     while let Some(packet) = rx.recv().await {
-        info!("Received {packet:?}");
+        let root = match ber::decode::<Root>(packet.payload()) {
+            Ok(it) => it,
+            Err(e) => {
+                error!("Error decoding glow root: {e}");
+                continue;
+            }
+        };
+
+        info!("Received root: {root:?}");
     }
 
     Ok(())

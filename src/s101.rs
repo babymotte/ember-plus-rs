@@ -15,7 +15,11 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::error::{EmberError, EmberResult};
+use crate::{
+    back_to_enum,
+    ember::EmberPacket,
+    error::{EmberError, EmberResult},
+};
 use std::{io::Read, slice};
 use tokio::io::{AsyncRead, AsyncReadExt};
 
@@ -61,6 +65,16 @@ pub const CRC_TABLE: &[u16] = &[
     0xf78f, 0xe606, 0xd49d, 0xc514, 0xb1ab, 0xa022, 0x92b9, 0x8330, 0x7bc7, 0x6a4e, 0x58d5, 0x495c,
     0x3de3, 0x2c6a, 0x1ef1, 0x0f78,
 ];
+
+back_to_enum! {
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Flags {
+    SinglePacket = FLAG_SINGLE_PACKET as isize,
+    MultiPacketFirst = FLAG_MULTI_PACKET_FIRST as isize,
+    MultiPacket = FLAG_MULTI_PACKET as isize,
+    MultiPacketLast = FLAG_MULTI_PACKET_LAST as isize,
+    EmptyPacket = FLAG_EMPTY_PACKET as isize,
+}}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum S101Frame {
@@ -137,6 +151,14 @@ impl S101Frame {
         match self {
             S101Frame::Escaping(EscapingS101Frame::KeepaliveRequest)
             | S101Frame::NonEscaping(NonEscapingS101Frame::KeepaliveRequest) => true,
+            _ => false,
+        }
+    }
+
+    pub(crate) fn is_keepalive_response(&self) -> bool {
+        match self {
+            S101Frame::Escaping(EscapingS101Frame::KeepaliveResponse)
+            | S101Frame::NonEscaping(NonEscapingS101Frame::KeepaliveResponse) => true,
             _ => false,
         }
     }
@@ -447,100 +469,6 @@ impl NonEscapingS101Frame {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct EmberPacket {
-    flags: u8,
-    dtd: u8,
-    app_bytes: u8,
-    glow_version_maj: u8,
-    glow_version_min: u8,
-    payload: Vec<u8>,
-}
-
-impl EmberPacket {
-    pub fn new(glow_version_maj: u8, glow_version_min: u8, payload: Vec<u8>) -> Self {
-        Self {
-            flags: FLAG_EMPTY_PACKET,
-            dtd: 0x01,
-            app_bytes: 0x02,
-            glow_version_maj,
-            glow_version_min,
-            payload,
-        }
-    }
-
-    pub fn set_empty(&mut self) {
-        self.flags = FLAG_EMPTY_PACKET;
-    }
-
-    pub fn set_single(&mut self) {
-        self.flags = FLAG_SINGLE_PACKET;
-    }
-
-    pub fn set_multi_first(&mut self) {
-        self.flags = FLAG_MULTI_PACKET_FIRST;
-    }
-
-    pub fn set_multi(&mut self) {
-        self.flags = FLAG_MULTI_PACKET;
-    }
-
-    pub fn set_multi_last(&mut self) {
-        self.flags = FLAG_MULTI_PACKET_LAST;
-    }
-
-    pub fn set_glow_dtd_version(&mut self, major: u8, minor: u8) {
-        self.glow_version_maj = major;
-        self.glow_version_min = minor;
-    }
-
-    pub fn payload(&self) -> &[u8] {
-        &self.payload
-    }
-
-    pub fn payload_mut(&mut self) -> &mut [u8] {
-        &mut self.payload
-    }
-
-    pub fn len(&self) -> usize {
-        self.payload.len() + 3 + self.app_bytes as usize
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.flags == FLAG_EMPTY_PACKET
-    }
-
-    fn to_bytes(&self, buf: &mut [u8]) {
-        if buf.len() < self.len() {
-            panic!("insufficient buffer size")
-        }
-
-        buf[0] = self.flags;
-        buf[1] = self.dtd;
-        buf[2] = self.app_bytes;
-        buf[3] = self.glow_version_min;
-        buf[4] = self.glow_version_maj;
-        (&mut buf[5..]).copy_from_slice(&self.payload);
-    }
-
-    fn from_bytes(buf: &[u8]) -> EmberResult<Self> {
-        if buf.len() <= 5 {
-            return Err(EmberError::Deserialization(format!(
-                "Invalid payload length {} (minimum is 6)",
-                buf.len()
-            )));
-        }
-        Ok(Self {
-            flags: buf[0],
-            dtd: buf[1],
-            app_bytes: buf[2],
-            glow_version_min: buf[3],
-            glow_version_maj: buf[4],
-            payload: buf[5..].to_vec(),
-        })
-    }
-}
-
 #[cfg(test)]
 mod test {
 
@@ -550,8 +478,7 @@ mod test {
 
     #[test]
     fn escaping_encoding_works() {
-        let mut packet = EmberPacket::new(2, 5, vec![0; 10]);
-        packet.set_single();
+        let packet = EmberPacket::new(Flags::SinglePacket, 2, 5, vec![0; 10]);
         let frame = EscapingS101Frame::EmberPacket(packet);
         let mut output = Vec::new();
         let mut temp = vec![0u8; 2 * frame.len()];
@@ -566,8 +493,8 @@ mod test {
 
     #[test]
     fn non_escaping_encoding_works() {
-        let mut packet = EmberPacket::new(2, 5, vec![0; 10]);
-        packet.set_single();
+        let mut packet = EmberPacket::new(Flags::SinglePacket, 2, 5, vec![0; 10]);
+        packet.set_flag(Flags::SinglePacket);
         let frame = NonEscapingS101Frame::EmberPacket(packet);
         let mut output = vec![0; 2 * frame.encoded_len()];
         frame.encode(&mut output);
@@ -585,8 +512,8 @@ mod test {
         let data = vec![
             254, 0, 14, 0, 1, 192, 1, 2, 5, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 107, 240, 255,
         ];
-        let mut packet = EmberPacket::new(2, 5, vec![0; 10]);
-        packet.set_single();
+        let mut packet = EmberPacket::new(Flags::SinglePacket, 2, 5, vec![0; 10]);
+        packet.set_flag(Flags::SinglePacket);
         let frame = EscapingS101Frame::EmberPacket(packet);
         let mut buf = vec![0; data.len()];
         assert_eq!(
@@ -603,8 +530,8 @@ mod test {
             0xF8, 0x01, 0x13, 0x00, 0x0E, 0x00, 0x01, 0xC0, 0x01, 0x02, 0x05, 0x02, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         ];
-        let mut packet = EmberPacket::new(2, 5, vec![0; 10]);
-        packet.set_single();
+        let mut packet = EmberPacket::new(Flags::SinglePacket, 2, 5, vec![0; 10]);
+        packet.set_flag(Flags::SinglePacket);
         let frame = NonEscapingS101Frame::EmberPacket(packet);
         let mut buf = vec![0; data.len()];
         assert_eq!(
