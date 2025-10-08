@@ -662,63 +662,37 @@ mod test {
     use rasn::ber;
 
     #[test]
-    fn encode_command_works() {
-        let command = Command {
-            number: CommandType::GetDirectory,
-            options: None,
-        };
-        let encoded = ber::encode(&command).unwrap();
-        eprintln!(
-            "thing: [{}]",
-            encoded
-                .iter()
-                .map(|it| format!("0x{:02x?}", it))
-                .collect::<Vec<String>>()
-                .join(", ")
-        );
-        panic!();
+    fn serde_roundtrip() {
+        let original = Root::Elements(RootElementCollection(vec![RootElement::Element(
+            Element::Command(Command {
+                number: CommandType::GetDirectory,
+                options: Some(CommandOptions::DirFieldMask(FieldFlags::All)),
+            }),
+        )]));
+        let encoded = ber::encode(&original).unwrap();
+        let decoded = ber::decode(&encoded).unwrap();
+        assert_eq!(original, decoded);
     }
 
-    // #[test]
-    // fn serde_roundtrip() {
-    //     let original = Root::Elements(RootElementCollection(vec![RootElement::Element(
-    //         Element::Command(Command {
-    //             number: CommandType::GetDirectory,
-    //             options: Some(CommandOptions::DirFieldMask(FieldFlags::All)),
-    //         }),
-    //     )]));
-    //     let encoded = ber::encode(&original).unwrap();
-    //     let decoded = ber::decode(&encoded).unwrap();
-    //     assert_eq!(original, decoded);
-    // }
+    #[test]
+    fn get_dir_is_encoded_correctly() {
+        let expected: Vec<u8> = vec![
+            0x60, 0x10, 0x6b, 0x0e, 0xa0, 0x0c, 0x62, 0x0a, 0xa0, 0x3, 0x2, 0x1, 0x20, 0xa1, 0x3,
+            0x2, 0x1, 0xff,
+        ];
+        let root = Root::from(Command::get_directory(Some(FieldFlags::All)));
+        let encoded = ber::encode(&root).unwrap();
+        assert_eq!(expected, encoded);
+    }
 
-    // #[test]
-    // fn get_dir_is_encoded_correctly() {
-    //     let expected: Vec<u8> = vec![
-    //         0x60, 0x12, 0x6b, 0x15, 0xa0, 0x13, 0x62, 0x11, 0xa0, 0x3, 0x2, 0x1, 0x20, 0xa1, 0xa,
-    //         0x2, 0x8, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-    //     ];
-    //     let root = Root::from(Command::get_directory(Some(FieldFlags::All)));
-    //     let encoded = ber::encode(&root).unwrap();
-    //     eprintln!(
-    //         "thing: [{}]",
-    //         encoded
-    //             .iter()
-    //             .map(|it| format!("0x{:02x?}", it))
-    //             .collect::<Vec<String>>()
-    //             .join(", ")
-    //     );
-    //     assert_eq!(expected, encoded);
-    // }
-
-    // #[test]
-    // fn get_dir_is_decoded_correctly() {
-    //     let input: Vec<u8> = vec![
-    //         0x60, 0x12, 0x6b, 0x15, 0xa0, 0x13, 0x62, 0x11, 0xa0, 0x3, 0x2, 0x1, 0x20, 0xa1, 0xa,
-    //         0x2, 0x8, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-    //     ];
-    //     let decoded = ber::decode::<Root>(&input).unwrap();
-    //     let expected = Root::from(Command::get_directory(Some(FieldFlags::All)));
-    //     assert_eq!(expected, decoded);
-    // }
+    #[test]
+    fn get_dir_is_decoded_correctly() {
+        let input: Vec<u8> = vec![
+            0x60, 0x17, 0x6b, 0x15, 0xa0, 0x13, 0x62, 0x11, 0xa0, 0x3, 0x2, 0x1, 0x20, 0xa1, 0xa,
+            0x2, 0x8, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+        ];
+        let decoded = ber::decode::<Root>(&input).unwrap();
+        let expected = Root::from(Command::get_directory(Some(FieldFlags::All)));
+        assert_eq!(expected, decoded);
+    }
 }
