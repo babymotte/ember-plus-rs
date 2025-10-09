@@ -35,7 +35,7 @@ impl ClientHandler for EmberClientHandler {
         mut rx: mpsc::Receiver<Root>,
     ) -> EmberResult<()> {
         while let Some(msg) = rx.recv().await {
-            info!("Received ember message: {msg:?}");
+            trace!("Received ember message: {msg:?}");
             // TODO
         }
 

@@ -34,6 +34,8 @@ pub enum EmberError {
     BerEncodeError(#[from] EncodeError),
     #[error("BER decode error: {0}")]
     BerDecodeError(#[from] DecodeError),
+    #[error("Invalid data: {0}")]
+    InvalidData(String),
 }
 
 pub type EmberResult<T> = Result<T, EmberError>;

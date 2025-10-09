@@ -20,6 +20,7 @@ use crate::{
     error::EmberError,
     glow::Root,
     s101::{EscapingS101Frame, Flags, NonEscapingS101Frame, S101Frame},
+    utils::format_bytes,
 };
 use std::time::Duration;
 use tokio::{
@@ -308,10 +309,15 @@ async fn depacketize(mut rx: mpsc::Receiver<EmberPacket>, tx: mpsc::Sender<Root>
     while let Some(packet) = rx.recv().await {
         let root = match packet.flag() {
             Flags::SinglePacket => {
-                let root = match Root::from_packets(&[packet]) {
+                let packets = [packet];
+                let root = match Root::from_packets(&packets) {
                     Ok(it) => it,
                     Err(e) => {
-                        error!("Error de-packetizing ember message: {e}");
+                        error!(
+                            "Error de-packetizing ember message from packet:\n{}\n: {}",
+                            format_bytes(packets[0].payload()),
+                            e
+                        );
                         continue;
                     }
                 };
@@ -328,7 +334,15 @@ async fn depacketize(mut rx: mpsc::Receiver<EmberPacket>, tx: mpsc::Sender<Root>
                 let root = match Root::from_packets(&packets) {
                     Ok(it) => it,
                     Err(e) => {
-                        error!("Error de-packetizing ember message: {e}");
+                        error!(
+                            "Error de-packetizing ember message from packets:\n{}\n: {}",
+                            packets
+                                .iter()
+                                .map(|it| format_bytes(it.payload()))
+                                .collect::<Vec<String>>()
+                                .join("\n"),
+                            e
+                        );
                         continue;
                     }
                 };

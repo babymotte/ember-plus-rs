@@ -1,3 +1,5 @@
+use crate::glow::{Integer32, RelativeOid};
+
 #[macro_export]
 macro_rules! back_to_enum {
     ($(#[$meta:meta])* $vis:vis enum $name:ident {
@@ -19,4 +21,28 @@ macro_rules! back_to_enum {
             }
         }
     }
+}
+
+pub fn join(parent: Option<&RelativeOid>, number: Integer32) -> RelativeOid {
+    let mut path = as_path(parent).to_vec();
+    path.push(number as u32);
+    RelativeOid(path)
+}
+
+pub fn as_path(oid: Option<&RelativeOid>) -> &[u32] {
+    match oid {
+        Some(oid) => &oid.0,
+        None => &[],
+    }
+}
+
+pub fn format_bytes(bytes: &[u8]) -> String {
+    format!(
+        "[{}]",
+        bytes
+            .iter()
+            .map(|it| format!("0x{it:02x}"))
+            .collect::<Vec<String>>()
+            .join(", ")
+    )
 }

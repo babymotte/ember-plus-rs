@@ -15,9 +15,8 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use rasn::{AsnType, Decode, Decoder, Encode, Encoder, types::ObjectIdentifier};
-
 pub use ext::*;
+use rasn::{AsnType, Decode, Decoder, Encode, Encoder, de::Error};
 
 // =============================
 // Primitive aliases
@@ -25,6 +24,13 @@ pub use ext::*;
 pub type EmberString = String;
 pub type Integer32 = i32; // INTEGER (-2^31 .. 2^31-1)
 pub type Integer64 = i64; // INTEGER (-2^63 .. 2^63-1)
+
+// =============================
+// RELATIVE-OID
+// =============================
+#[derive(Debug, Clone, PartialEq, Eq, Hash, AsnType)]
+#[rasn(tag(universal, 13))]
+pub struct RelativeOid(pub Vec<u32>);
 
 // =============================
 // Template
@@ -44,7 +50,7 @@ pub struct Template {
 #[rasn(tag(application, 25))]
 pub struct QualifiedTemplate {
     #[rasn(tag(explicit(context, 0)))]
-    pub path: ObjectIdentifier,
+    pub path: RelativeOid,
     #[rasn(tag(explicit(context, 1)))]
     pub element: Option<TemplateElement>,
     #[rasn(tag(explicit(context, 2)))]
@@ -78,22 +84,22 @@ pub struct Parameter {
 #[rasn(tag(application, 9))]
 pub struct QualifiedParameter {
     #[rasn(tag(explicit(context, 0)))]
-    pub path: ObjectIdentifier,
+    pub path: RelativeOid,
     #[rasn(tag(explicit(context, 1)))]
     pub contents: Option<ParameterContents>,
     #[rasn(tag(explicit(context, 2)))]
     pub children: Option<ElementCollection>,
 }
 
-#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
-#[rasn(tag(universal, 17))] // SET
+#[derive(Debug, Clone, Default, PartialEq, AsnType, Decode, Encode)]
+#[rasn(set, tag(universal, 17))]
 pub struct ParameterContents {
     #[rasn(tag(explicit(context, 0)))]
     pub identifier: Option<EmberString>,
     #[rasn(tag(explicit(context, 1)))]
     pub description: Option<EmberString>,
     #[rasn(tag(explicit(context, 2)))]
-    pub value: Option<Value>,
+    pub param_value: Option<Value>,
     #[rasn(tag(explicit(context, 3)))]
     pub minimum: Option<MinMax>,
     #[rasn(tag(explicit(context, 4)))]
@@ -125,7 +131,7 @@ pub struct ParameterContents {
     #[rasn(tag(explicit(context, 17)))]
     pub schema_identifiers: Option<EmberString>,
     #[rasn(tag(explicit(context, 18)))]
-    pub template_reference: Option<ObjectIdentifier>,
+    pub template_reference: Option<RelativeOid>,
 }
 
 #[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
@@ -190,8 +196,12 @@ pub struct StringIntegerPair {
 
 // StringIntegerCollection ::= [APPLICATION 8] IMPLICIT SEQUENCE OF [0] StringIntegerPair
 #[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
-#[rasn(tag(application, 8))]
-pub struct StringIntegerCollection(#[rasn(tag(context, 0))] pub Vec<StringIntegerPair>);
+#[rasn(tag(application, 8), delegate)]
+pub struct StringIntegerCollection(pub Vec<TaggedStringIntegerPair>);
+
+#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[rasn(tag(0))]
+pub struct TaggedStringIntegerPair(pub StringIntegerPair);
 
 #[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(application, 12))]
@@ -287,15 +297,15 @@ pub struct Node {
 #[rasn(tag(application, 10))]
 pub struct QualifiedNode {
     #[rasn(tag(explicit(context, 0)))]
-    pub path: ObjectIdentifier,
+    pub path: RelativeOid,
     #[rasn(tag(explicit(context, 1)))]
     pub contents: Option<NodeContents>,
     #[rasn(tag(explicit(context, 2)))]
     pub children: Option<ElementCollection>,
 }
 
-#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
-#[rasn(tag(universal, 17))]
+#[derive(Debug, Clone, Default, PartialEq, AsnType, Decode, Encode)]
+#[rasn(set, tag(universal, 17))]
 pub struct NodeContents {
     #[rasn(tag(explicit(context, 0)))]
     pub identifier: Option<EmberString>,
@@ -308,7 +318,7 @@ pub struct NodeContents {
     #[rasn(tag(explicit(context, 4)))]
     pub schema_identifiers: Option<EmberString>,
     #[rasn(tag(explicit(context, 5)))]
-    pub template_reference: Option<ObjectIdentifier>,
+    pub template_reference: Option<RelativeOid>,
 }
 
 // =============================
@@ -332,7 +342,7 @@ pub struct Matrix {
 }
 
 #[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
-#[rasn(tag(universal, 17))]
+#[rasn(set, tag(universal, 17))]
 pub struct MatrixContents {
     #[rasn(tag(explicit(context, 0)))]
     pub identifier: EmberString,
@@ -359,7 +369,7 @@ pub struct MatrixContents {
     #[rasn(tag(explicit(context, 11)))]
     pub schema_identifiers: Option<EmberString>,
     #[rasn(tag(explicit(context, 12)))]
-    pub template_reference: Option<ObjectIdentifier>,
+    pub template_reference: Option<RelativeOid>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, AsnType, Decode, Encode)]
@@ -381,29 +391,37 @@ pub enum MatrixAddressingMode {
 #[rasn(choice)]
 pub enum ParametersLocation {
     #[rasn(tag(universal, 13))] // RELATIVE-OID
-    BasePath(ObjectIdentifier),
+    BasePath(RelativeOid),
     #[rasn(tag(universal, 2))] // INTEGER
     Inline(Integer32),
 }
 
 // LabelCollection ::= SEQUENCE OF [0] Label
 #[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
-#[rasn(tag(universal, 16))]
-pub struct LabelCollection(#[rasn(tag(context, 0))] pub Vec<Label>);
+#[rasn(tag(universal, 16), delegate)]
+pub struct LabelCollection(pub Vec<TaggedLabel>);
+
+#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[rasn(tag(0))]
+pub struct TaggedLabel(pub Label);
 
 #[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(application, 18))]
 pub struct Label {
     #[rasn(tag(explicit(context, 0)))]
-    pub base_path: ObjectIdentifier,
+    pub base_path: RelativeOid,
     #[rasn(tag(explicit(context, 1)))]
     pub description: EmberString,
 }
 
 // TargetCollection ::= SEQUENCE OF [0] Target
 #[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
-#[rasn(tag(universal, 16))]
-pub struct TargetCollection(#[rasn(tag(context, 0))] pub Vec<Target>);
+#[rasn(tag(universal, 16), delegate)]
+pub struct TargetCollection(pub Vec<TaggedTarget>);
+
+#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[rasn(tag(0))]
+pub struct TaggedTarget(pub Target);
 
 #[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(application, 14))]
@@ -418,21 +436,25 @@ pub struct Signal {
     pub contents: Option<SignalContents>,
 }
 
-#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
-#[rasn(tag(universal, 17))]
+#[derive(Debug, Clone, Default, PartialEq, AsnType, Decode, Encode)]
+#[rasn(set, tag(universal, 17))]
 pub struct SignalContents {
     #[rasn(tag(explicit(context, 0)))]
     pub identifier: Option<EmberString>,
     #[rasn(tag(explicit(context, 1)))]
     pub is_online: Option<bool>,
     #[rasn(tag(explicit(context, 2)))]
-    pub labels_location: Option<ObjectIdentifier>,
+    pub labels_location: Option<RelativeOid>,
 }
 
 // SourceCollection ::= SEQUENCE OF [0] Source
 #[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
-#[rasn(tag(universal, 16))]
-pub struct SourceCollection(#[rasn(tag(context, 0))] pub Vec<Source>);
+#[rasn(tag(universal, 16), delegate)]
+pub struct SourceCollection(pub Vec<TaggedSource>);
+
+#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[rasn(tag(0))]
+pub struct TaggedSource(pub Source);
 
 #[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(application, 15))]
@@ -440,8 +462,12 @@ pub struct Source(pub Signal);
 
 // ConnectionCollection ::= SEQUENCE OF [0] Connection
 #[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
-#[rasn(tag(universal, 16))]
-pub struct ConnectionCollection(#[rasn(tag(context, 0))] pub Vec<Connection>);
+#[rasn(tag(universal, 16), delegate)]
+pub struct ConnectionCollection(pub Vec<TaggedConnection>);
+
+#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[rasn(tag(0))]
+pub struct TaggedConnection(pub Connection);
 
 #[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(application, 16))]
@@ -458,7 +484,7 @@ pub struct Connection {
 
 #[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(universal, 13))]
-pub struct PackedNumbers(pub ObjectIdentifier);
+pub struct PackedNumbers(pub RelativeOid);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, AsnType, Decode, Encode)]
 #[rasn(enumerated, tag(universal, 2))]
@@ -481,7 +507,7 @@ pub enum ConnectionDisposition {
 #[rasn(tag(application, 17))]
 pub struct QualifiedMatrix {
     #[rasn(tag(explicit(context, 0)))]
-    pub path: ObjectIdentifier,
+    pub path: RelativeOid,
     #[rasn(tag(explicit(context, 1)))]
     pub contents: Option<MatrixContents>,
     #[rasn(tag(explicit(context, 2)))]
@@ -512,15 +538,15 @@ pub struct Function {
 #[rasn(tag(application, 20))]
 pub struct QualifiedFunction {
     #[rasn(tag(explicit(context, 0)))]
-    pub path: ObjectIdentifier,
+    pub path: RelativeOid,
     #[rasn(tag(explicit(context, 1)))]
     pub contents: Option<FunctionContents>,
     #[rasn(tag(explicit(context, 2)))]
     pub children: Option<ElementCollection>,
 }
 
-#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
-#[rasn(tag(universal, 17))]
+#[derive(Debug, Clone, Default, PartialEq, AsnType, Decode, Encode)]
+#[rasn(set, tag(universal, 17))]
 pub struct FunctionContents {
     #[rasn(tag(explicit(context, 0)))]
     pub identifier: Option<EmberString>,
@@ -531,13 +557,17 @@ pub struct FunctionContents {
     #[rasn(tag(explicit(context, 3)))]
     pub result: Option<TupleDescription>,
     #[rasn(tag(explicit(context, 4)))]
-    pub template_reference: Option<ObjectIdentifier>,
+    pub template_reference: Option<RelativeOid>,
 }
 
 // TupleDescription ::= SEQUENCE OF [0] TupleItemDescription
 #[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
-#[rasn(tag(universal, 16))]
-pub struct TupleDescription(#[rasn(tag(context, 0))] pub Vec<TupleItemDescription>);
+#[rasn(tag(universal, 16), delegate)]
+pub struct TupleDescription(pub Vec<TaggedTupleItemDescription>);
+
+#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[rasn(tag(0))]
+pub struct TaggedTupleItemDescription(pub TupleItemDescription);
 
 #[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(application, 21))]
@@ -559,8 +589,12 @@ pub struct Invocation {
 
 // Tuple ::= SEQUENCE OF [0] Value
 #[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
-#[rasn(tag(universal, 16))]
-pub struct Tuple(#[rasn(tag(context, 0))] pub Vec<Value>);
+#[rasn(tag(universal, 16), delegate)]
+pub struct Tuple(pub Vec<TaggedValue>);
+
+#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[rasn(tag(0))]
+pub struct TaggedValue(pub Value);
 
 #[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(application, 23))]
@@ -578,8 +612,12 @@ pub struct InvocationResult {
 // =============================
 
 #[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
-#[rasn(tag(application, 4))]
-pub struct ElementCollection(#[rasn(tag(context, 0))] pub Vec<Element>);
+#[rasn(tag(application, 4), delegate)]
+pub struct ElementCollection(pub Vec<TaggedElement>);
+
+#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[rasn(tag(0))]
+pub struct TaggedElement(pub Element);
 
 #[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
 #[rasn(choice)]
@@ -603,8 +641,12 @@ pub struct StreamEntry {
 
 // StreamCollection ::= [APPLICATION 6] IMPLICIT SEQUENCE OF [0] StreamEntry
 #[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
-#[rasn(tag(application, 6))]
-pub struct StreamCollection(#[rasn(tag(context, 0))] pub Vec<StreamEntry>);
+#[rasn(tag(application, 6), delegate)]
+pub struct StreamCollection(pub Vec<TaggedStreamEntry>);
+
+#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[rasn(tag(6))]
+pub struct TaggedStreamEntry(pub StreamEntry);
 
 #[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(explicit(application, 0)))] // Root ::= [APPLICATION 0] CHOICE { ... } (explicit by module default)
@@ -617,8 +659,12 @@ pub enum Root {
 
 // RootElementCollection ::= [APPLICATION 11] IMPLICIT SEQUENCE OF [0] RootElement
 #[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
-#[rasn(tag(application, 11))]
-pub struct RootElementCollection(#[rasn(tag(context, 0))] pub Vec<RootElement>);
+#[rasn(tag(application, 11), delegate)]
+pub struct RootElementCollection(pub Vec<TaggedRootElement>);
+
+#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[rasn(tag(0))]
+pub struct TaggedRootElement(pub RootElement);
 
 #[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
 #[rasn(choice)]
@@ -633,14 +679,15 @@ pub enum RootElement {
 
 mod ext {
 
+    use super::*;
     use crate::{
         ember::{EmberPacket, MAX_PAYLOAD_LEN},
         error::EmberResult,
         s101::Flags,
+        utils::join,
     };
-
-    use super::*;
-    use rasn::ber;
+    use rasn::{Codec, ber};
+    use std::fmt::Debug;
     use tracing::error;
 
     pub const GLOW_VERSION_MAJOR: u8 = 2;
@@ -673,8 +720,8 @@ mod ext {
 
     impl From<Command> for Root {
         fn from(value: Command) -> Self {
-            Root::Elements(RootElementCollection(vec![RootElement::Element(
-                Element::Command(value),
+            Root::Elements(RootElementCollection(vec![TaggedRootElement(
+                RootElement::Element(Element::Command(value)),
             )]))
         }
     }
@@ -724,17 +771,357 @@ mod ext {
                 Flags::MultiPacket
             }
         }
+
+        fn command(command: Command) -> Root {
+            Root::Elements(RootElementCollection(vec![TaggedRootElement(
+                RootElement::Element(Element::Command(command)),
+            )]))
+        }
+
+        fn element(element: Element) -> Root {
+            Root::Elements(RootElementCollection(vec![TaggedRootElement(
+                RootElement::Element(element),
+            )]))
+        }
+
+        fn qualified_node(node: QualifiedNode) -> Root {
+            Root::Elements(RootElementCollection(vec![TaggedRootElement(
+                RootElement::QualifiedNode(node),
+            )]))
+        }
+
+        fn qualified_parameter(parameter: QualifiedParameter) -> Root {
+            Root::Elements(RootElementCollection(vec![TaggedRootElement(
+                RootElement::QualifiedParameter(parameter),
+            )]))
+        }
+
+        fn qualified_matrix(matrix: QualifiedMatrix) -> Root {
+            Root::Elements(RootElementCollection(vec![TaggedRootElement(
+                RootElement::QualifiedMatrix(matrix),
+            )]))
+        }
+
+        fn qualified_template(template: QualifiedTemplate) -> Root {
+            Root::Elements(RootElementCollection(vec![TaggedRootElement(
+                RootElement::QualifiedTemplate(template),
+            )]))
+        }
+
+        fn qualified_function(function: QualifiedFunction) -> Root {
+            Root::Elements(RootElementCollection(vec![TaggedRootElement(
+                RootElement::QualifiedFunction(function),
+            )]))
+        }
     }
 
-    pub enum TreeNode<'a> {
-        Node(&'a Node),
-        QualifiedNode(&'a QualifiedNode),
-        Matrix(&'a Matrix),
-        QualifiedMatrix(&'a QualifiedMatrix),
-        Parameter(&'a Parameter),
-        QualifiedParameter(&'a QualifiedParameter),
-        Template(&'a Template),
-        QualifiedTemplate(&'a QualifiedTemplate),
+    impl ElementCollection {
+        fn command(commad: Command) -> ElementCollection {
+            ElementCollection(vec![TaggedElement(Element::Command(commad))])
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    pub enum TreeNode {
+        Empty,
+        Node(Node),
+        QualifiedNode(QualifiedNode),
+        Matrix(Matrix),
+        QualifiedMatrix(QualifiedMatrix),
+        Parameter(Parameter),
+        QualifiedParameter(QualifiedParameter),
+        Template(Template),
+        QualifiedTemplate(QualifiedTemplate),
+    }
+
+    impl TreeNode {
+        pub fn get_directory(self, parent_path: Option<&RelativeOid>) -> Option<Root> {
+            let command = Command::get_directory(Some(FieldFlags::All));
+            match self {
+                TreeNode::Empty => Some(Root::command(command)),
+                TreeNode::Node(node) => {
+                    if node.is_online() {
+                        Some(Root::qualified_node(QualifiedNode::command(
+                            join(parent_path, node.number),
+                            command,
+                        )))
+                    } else {
+                        None
+                    }
+                }
+                TreeNode::QualifiedNode(mut qualified_node) => {
+                    if qualified_node.is_online() {
+                        qualified_node.contents = None;
+                        qualified_node.children = Some(ElementCollection::command(command));
+                        Some(Root::qualified_node(qualified_node))
+                    } else {
+                        None
+                    }
+                }
+                TreeNode::Matrix(matrix) => Some(Root::qualified_matrix(QualifiedMatrix::command(
+                    join(parent_path, matrix.number),
+                    command,
+                ))),
+                TreeNode::QualifiedMatrix(mut qualified_matrix) => {
+                    qualified_matrix.contents = None;
+                    qualified_matrix.children = Some(ElementCollection::command(command));
+                    Some(Root::qualified_matrix(qualified_matrix))
+                }
+                TreeNode::Parameter(parameter) => {
+                    if parameter.is_online() {
+                        Some(Root::qualified_parameter(QualifiedParameter::command(
+                            join(parent_path, parameter.number),
+                            command,
+                        )))
+                    } else {
+                        None
+                    }
+                }
+                TreeNode::QualifiedParameter(mut qualified_parameter) => {
+                    if qualified_parameter.is_online() {
+                        qualified_parameter.contents = None;
+                        qualified_parameter.children = Some(ElementCollection::command(command));
+                        Some(Root::qualified_parameter(qualified_parameter))
+                    } else {
+                        None
+                    }
+                }
+                TreeNode::Template(_) => None,
+                TreeNode::QualifiedTemplate(_) => None,
+            }
+        }
+
+        pub fn oid(&self, parent: Option<&RelativeOid>) -> Option<RelativeOid> {
+            match self {
+                TreeNode::Empty => None,
+                TreeNode::Node(node) => Some(join(parent, node.number)),
+                TreeNode::QualifiedNode(qualified_node) => Some(qualified_node.path.clone()),
+                TreeNode::Matrix(matrix) => Some(join(parent, matrix.number)),
+                TreeNode::QualifiedMatrix(qualified_matrix) => Some(qualified_matrix.path.clone()),
+                TreeNode::Parameter(parameter) => Some(join(parent, parameter.number)),
+                TreeNode::QualifiedParameter(qualified_parameter) => {
+                    Some(qualified_parameter.path.clone())
+                }
+                TreeNode::Template(template) => Some(join(parent, template.number)),
+                TreeNode::QualifiedTemplate(qualified_template) => {
+                    Some(qualified_template.path.clone())
+                }
+            }
+        }
+
+        pub fn is_empty(&self) -> bool {
+            match self {
+                TreeNode::Empty => false,
+                TreeNode::Node(node) => node.is_empty(),
+                TreeNode::QualifiedNode(qualified_node) => qualified_node.is_empty(),
+                TreeNode::Matrix(matrix) => matrix.is_empty(),
+                TreeNode::QualifiedMatrix(qualified_matrix) => qualified_matrix.is_empty(),
+                TreeNode::Parameter(parameter) => parameter.is_empty(),
+                TreeNode::QualifiedParameter(qualified_parameter) => qualified_parameter.is_empty(),
+                TreeNode::Template(_) | TreeNode::QualifiedTemplate(_) => true,
+            }
+        }
+
+        pub fn is_online(&self) -> bool {
+            match self {
+                TreeNode::Empty => false,
+                TreeNode::Node(node) => node.is_online(),
+                TreeNode::QualifiedNode(qualified_node) => qualified_node.is_online(),
+                TreeNode::Matrix(_) | TreeNode::QualifiedMatrix(_) => true,
+                TreeNode::Parameter(parameter) => parameter.is_online(),
+                TreeNode::QualifiedParameter(qualified_parameter) => {
+                    qualified_parameter.is_online()
+                }
+                TreeNode::Template(_) | TreeNode::QualifiedTemplate(_) => false,
+            }
+        }
+    }
+
+    impl Node {
+        pub fn is_empty(&self) -> bool {
+            self.children.is_none() && self.contents.is_none()
+        }
+
+        fn is_online(&self) -> bool {
+            let Some(contents) = &self.contents else {
+                return false;
+            };
+            contents.is_online.unwrap_or(false)
+        }
+    }
+
+    impl QualifiedNode {
+        pub fn command(path: RelativeOid, command: Command) -> QualifiedNode {
+            QualifiedNode {
+                path,
+                children: Some(ElementCollection(vec![TaggedElement(Element::Command(
+                    command,
+                ))])),
+                contents: None,
+            }
+        }
+
+        pub fn is_empty(&self) -> bool {
+            self.children.is_none() && self.contents.is_none()
+        }
+
+        fn is_online(&self) -> bool {
+            let Some(contents) = &self.contents else {
+                return false;
+            };
+            contents.is_online.unwrap_or(false)
+        }
+    }
+
+    impl Parameter {
+        pub fn is_empty(&self) -> bool {
+            self.children.is_none() && self.contents.is_none()
+        }
+
+        fn is_online(&self) -> bool {
+            let Some(contents) = &self.contents else {
+                return false;
+            };
+            contents.is_online.unwrap_or(false)
+        }
+    }
+
+    impl QualifiedParameter {
+        pub fn command(path: RelativeOid, command: Command) -> QualifiedParameter {
+            QualifiedParameter {
+                path,
+                children: Some(ElementCollection(vec![TaggedElement(Element::Command(
+                    command,
+                ))])),
+                contents: None,
+            }
+        }
+
+        pub fn is_empty(&self) -> bool {
+            self.children.is_none() && self.contents.is_none()
+        }
+
+        fn is_online(&self) -> bool {
+            let Some(contents) = &self.contents else {
+                return false;
+            };
+            contents.is_online.unwrap_or(false)
+        }
+    }
+
+    impl Matrix {
+        pub fn is_empty(&self) -> bool {
+            self.children.is_none() && self.contents.is_none()
+        }
+    }
+
+    impl Signal {
+        fn is_online(&self) -> bool {
+            let Some(contents) = &self.contents else {
+                return false;
+            };
+            contents.is_online.unwrap_or(false)
+        }
+    }
+
+    impl QualifiedMatrix {
+        pub fn command(path: RelativeOid, command: Command) -> QualifiedMatrix {
+            QualifiedMatrix {
+                path,
+                children: Some(ElementCollection(vec![TaggedElement(Element::Command(
+                    command,
+                ))])),
+                contents: None,
+                connections: None,
+                sources: None,
+                targets: None,
+            }
+        }
+
+        pub fn is_empty(&self) -> bool {
+            self.children.is_none()
+                && self.contents.is_none()
+                && self.connections.is_none()
+                && self.sources.is_none()
+                && self.targets.is_none()
+        }
+    }
+
+    impl QualifiedFunction {
+        pub fn command(path: RelativeOid, command: Command) -> QualifiedFunction {
+            QualifiedFunction {
+                path,
+                children: Some(ElementCollection(vec![TaggedElement(Element::Command(
+                    command,
+                ))])),
+                contents: None,
+            }
+        }
+
+        pub fn is_empty(&self) -> bool {
+            self.children.is_none() && self.contents.is_none()
+        }
+    }
+
+    impl Encode for RelativeOid {
+        fn encode_with_tag_and_constraints<'b, E: Encoder<'b>>(
+            &self,
+            encoder: &mut E,
+            tag: rasn::prelude::Tag,
+            constraints: rasn::prelude::Constraints,
+            identifier: rasn::prelude::Identifier,
+        ) -> Result<(), E::Error> {
+            let mut content = Vec::new();
+            for &arc in &self.0 {
+                // base-128 encode each arc
+                let mut buf = [0u8; 5];
+                let mut i = buf.len();
+                let mut v = arc as u64;
+                loop {
+                    i -= 1;
+                    buf[i] = (v & 0x7f) as u8;
+                    v >>= 7;
+                    if v == 0 {
+                        break;
+                    }
+                }
+                // set continuation bits for all but the last
+                for j in i..buf.len() - 1 {
+                    buf[j] |= 0x80;
+                }
+                content.extend_from_slice(&buf[i..]);
+            }
+            // write a primitive with RELATIVE-OID tag
+            encoder.encode_octet_string(tag, constraints, &content, identifier)?;
+            Ok(())
+        }
+    }
+
+    impl Decode for RelativeOid {
+        fn decode_with_tag_and_constraints<D: Decoder>(
+            decoder: &mut D,
+            tag: rasn::prelude::Tag,
+            constraints: rasn::prelude::Constraints,
+        ) -> Result<Self, D::Error> {
+            let bytes: Vec<u8> = decoder.decode_octet_string(tag, constraints)?; // raw content octets
+            // parse base-128 arcs
+            let mut arcs = Vec::new();
+            let mut cur: u32 = 0;
+            for &b in &bytes {
+                cur = (cur << 7) | u32::from(b & 0x7f);
+                if (b & 0x80) == 0 {
+                    arcs.push(cur);
+                    cur = 0;
+                }
+            }
+            if (bytes.last().copied().unwrap_or(0) & 0x80) != 0 {
+                return Err(D::Error::custom(
+                    "unterminated RELATIVE-OID arc",
+                    Codec::Ber,
+                ));
+            }
+            Ok(RelativeOid(arcs))
+        }
     }
 }
 
@@ -747,11 +1134,11 @@ mod test {
 
     #[test]
     fn serde_roundtrip() {
-        let original = Root::Elements(RootElementCollection(vec![RootElement::Element(
-            Element::Command(Command {
+        let original = Root::Elements(RootElementCollection(vec![TaggedRootElement(
+            RootElement::Element(Element::Command(Command {
                 number: CommandType::GetDirectory,
                 options: Some(CommandOptions::DirFieldMask(FieldFlags::All)),
-            }),
+            })),
         )]));
         let encoded = ber::encode(&original).unwrap();
         let decoded = ber::decode(&encoded).unwrap();
@@ -829,16 +1216,312 @@ mod test {
         assert_eq!(original, reconstructed);
     }
 
+    #[test]
+    fn relative_oid_is_encoded_correctly() {
+        let oid = RelativeOid(vec![1, 2, 3]);
+        let encoded = ber::encode(&oid).unwrap();
+        eprintln!(
+            "oid: [{}]",
+            encoded
+                .iter()
+                .map(|it| format!("0x{it:02x}"))
+                .collect::<Vec<String>>()
+                .join(", ")
+        );
+        let expected = vec![0x0d, 0x03, 0x01, 0x02, 0x03];
+        assert_eq!(expected, encoded);
+    }
+
+    #[test]
+    fn big_relative_oid_is_encoded_correctly() {
+        let oid = RelativeOid(vec![16383]);
+        let encoded = ber::encode(&oid).unwrap();
+        eprintln!(
+            "oid: [{}]",
+            encoded
+                .iter()
+                .map(|it| format!("0x{it:02x}"))
+                .collect::<Vec<String>>()
+                .join(", ")
+        );
+        let expected = vec![0x0d, 0x02, 0xff, 0x7f];
+        assert_eq!(expected, encoded);
+    }
+
+    #[test]
+    fn parameters_are_decoded_correctly() {
+        let input = [
+            0x60, 0x62, 0x6b, 0x60, 0xa0, 0x2e, 0x69, 0x2c, 0xa0, 0x05, 0x0d, 0x03, 0x01, 0x01,
+            0x01, 0xa1, 0x23, 0x31, 0x21, 0xa0, 0x04, 0x0c, 0x02, 0x50, 0x31, 0xa1, 0x04, 0x0c,
+            0x02, 0x50, 0x31, 0xa5, 0x03, 0x02, 0x01, 0x03, 0xa4, 0x04, 0x02, 0x02, 0x03, 0xe8,
+            0xa3, 0x03, 0x02, 0x01, 0x00, 0xa2, 0x03, 0x02, 0x01, 0x00, 0xa0, 0x2e, 0x69, 0x2c,
+            0xa0, 0x05, 0x0d, 0x03, 0x01, 0x01, 0x02, 0xa1, 0x23, 0x31, 0x21, 0xa0, 0x04, 0x0c,
+            0x02, 0x50, 0x32, 0xa1, 0x04, 0x0c, 0x02, 0x50, 0x32, 0xa5, 0x03, 0x02, 0x01, 0x03,
+            0xa4, 0x04, 0x02, 0x02, 0x03, 0xe8, 0xa3, 0x03, 0x02, 0x01, 0x00, 0xa2, 0x03, 0x02,
+            0x01, 0x00,
+        ];
+        let decoded = ber::decode::<Root>(&input).unwrap();
+        let expected = Root::Elements(RootElementCollection(vec![
+            TaggedRootElement(RootElement::QualifiedParameter(QualifiedParameter {
+                path: RelativeOid(vec![1, 1, 1]),
+                children: None,
+                contents: Some(ParameterContents {
+                    identifier: Some("P1".to_owned()),
+                    description: Some("P1".to_owned()),
+                    param_value: Some(Value::Integer(0)),
+                    minimum: Some(MinMax::Integer(0)),
+                    maximum: Some(MinMax::Integer(1000)),
+                    access: Some(ParameterAccess::ReadWrite),
+                    format: None,
+                    enumeration: None,
+                    factor: None,
+                    is_online: None,
+                    formula: None,
+                    step: None,
+                    default: None,
+                    r#type: None,
+                    stream_identifier: None,
+                    enum_map: None,
+                    stream_descriptor: None,
+                    schema_identifiers: None,
+                    template_reference: None,
+                }),
+            })),
+            TaggedRootElement(RootElement::QualifiedParameter(QualifiedParameter {
+                path: RelativeOid(vec![1, 1, 2]),
+                children: None,
+                contents: Some(ParameterContents {
+                    identifier: Some("P2".to_owned()),
+                    description: Some("P2".to_owned()),
+                    param_value: Some(Value::Integer(0)),
+                    minimum: Some(MinMax::Integer(0)),
+                    maximum: Some(MinMax::Integer(1000)),
+                    access: Some(ParameterAccess::ReadWrite),
+                    format: None,
+                    enumeration: None,
+                    factor: None,
+                    is_online: None,
+                    formula: None,
+                    step: None,
+                    default: None,
+                    r#type: None,
+                    stream_identifier: None,
+                    enum_map: None,
+                    stream_descriptor: None,
+                    schema_identifiers: None,
+                    template_reference: None,
+                }),
+            })),
+        ]));
+
+        assert_eq!(expected, decoded);
+    }
+
+    #[test]
+    fn parameter_is_decoded_correctly() {
+        let input = vec![
+            0x60, 0x32, 0x6b, 0x30, 0xa0, 0x2e, 0x69, 0x2c, 0xa0, 0x5, 0xd, 0x3, 0x1, 0x1, 0x1,
+            0xa1, 0x23, 0x31, 0x21, 0xa0, 0x4, 0xc, 0x2, 0x50, 0x31, 0xa1, 0x4, 0xc, 0x2, 0x50,
+            0x31, 0xa5, 0x3, 0x2, 0x1, 0x3, 0xa4, 0x4, 0x2, 0x2, 0x3, 0xe8, 0xa3, 0x3, 0x2, 0x1,
+            0x0, 0xa2, 0x3, 0x2, 0x1, 0x0,
+        ];
+
+        let decoded = ber::decode::<Root>(&input).unwrap();
+
+        let expected = Root::Elements(RootElementCollection(vec![TaggedRootElement(
+            RootElement::QualifiedParameter(QualifiedParameter {
+                path: RelativeOid(vec![1, 1, 1]),
+                children: None,
+                contents: Some(ParameterContents {
+                    identifier: Some("P1".to_owned()),
+                    description: Some("P1".to_owned()),
+                    param_value: Some(Value::Integer(0)),
+                    minimum: Some(MinMax::Integer(0)),
+                    maximum: Some(MinMax::Integer(1000)),
+                    access: Some(ParameterAccess::ReadWrite),
+                    format: None,
+                    enumeration: None,
+                    factor: None,
+                    is_online: None,
+                    formula: None,
+                    step: None,
+                    default: None,
+                    r#type: None,
+                    stream_identifier: None,
+                    enum_map: None,
+                    stream_descriptor: None,
+                    schema_identifiers: None,
+                    template_reference: None,
+                }),
+            }),
+        )]));
+
+        assert_eq!(expected, decoded);
+    }
+
+    #[test]
+    fn parameter_is_encoded_correctly() {
+        let root = Root::Elements(RootElementCollection(vec![TaggedRootElement(
+            RootElement::QualifiedParameter(QualifiedParameter {
+                path: RelativeOid(vec![1, 1, 1]),
+                children: None,
+                contents: Some(ParameterContents {
+                    identifier: Some("P1".to_owned()),
+                    description: Some("P1".to_owned()),
+                    param_value: Some(Value::Integer(0)),
+                    minimum: Some(MinMax::Integer(0)),
+                    maximum: Some(MinMax::Integer(0)),
+                    access: Some(ParameterAccess::ReadWrite),
+                    format: None,
+                    enumeration: None,
+                    factor: None,
+                    is_online: None,
+                    formula: None,
+                    step: None,
+                    default: None,
+                    r#type: None,
+                    stream_identifier: None,
+                    enum_map: None,
+                    stream_descriptor: None,
+                    schema_identifiers: None,
+                    template_reference: None,
+                }),
+            }),
+        )]));
+
+        let encoded = ber::encode(&root).unwrap();
+        let decoded = ber::decode::<Root>(&encoded).unwrap();
+
+        assert_eq!(root, decoded);
+    }
+
+    #[test]
+    fn parameters_are_encoded_correctly() {
+        let root = Root::Elements(RootElementCollection(vec![
+            TaggedRootElement(RootElement::QualifiedParameter(QualifiedParameter {
+                path: RelativeOid(vec![1, 1, 1]),
+                children: None,
+                contents: Some(ParameterContents {
+                    identifier: Some("P1".to_owned()),
+                    description: Some("P1".to_owned()),
+                    param_value: Some(Value::Integer(0)),
+                    minimum: Some(MinMax::Integer(0)),
+                    maximum: Some(MinMax::Integer(1000)),
+                    access: Some(ParameterAccess::ReadWrite),
+                    format: None,
+                    enumeration: None,
+                    factor: None,
+                    is_online: None,
+                    formula: None,
+                    step: None,
+                    default: None,
+                    r#type: None,
+                    stream_identifier: None,
+                    enum_map: None,
+                    stream_descriptor: None,
+                    schema_identifiers: None,
+                    template_reference: None,
+                }),
+            })),
+            TaggedRootElement(RootElement::QualifiedParameter(QualifiedParameter {
+                path: RelativeOid(vec![1, 1, 2]),
+                children: None,
+                contents: Some(ParameterContents {
+                    identifier: Some("P2".to_owned()),
+                    description: Some("P2".to_owned()),
+                    param_value: Some(Value::Integer(0)),
+                    minimum: Some(MinMax::Integer(0)),
+                    maximum: Some(MinMax::Integer(1000)),
+                    access: Some(ParameterAccess::ReadWrite),
+                    format: None,
+                    enumeration: None,
+                    factor: None,
+                    is_online: None,
+                    formula: None,
+                    step: None,
+                    default: None,
+                    r#type: None,
+                    stream_identifier: None,
+                    enum_map: None,
+                    stream_descriptor: None,
+                    schema_identifiers: None,
+                    template_reference: None,
+                }),
+            })),
+        ]));
+
+        let encoded = ber::encode(&root).unwrap();
+        let decoded = ber::decode::<Root>(&encoded).unwrap();
+
+        assert_eq!(root, decoded);
+    }
+
+    #[test]
+    fn node_is_decoded_correctly() {
+        let expected = Root::Elements(RootElementCollection(vec![TaggedRootElement(
+            RootElement::Element(Element::Node(Node {
+                number: 1,
+                contents: Some(NodeContents {
+                    identifier: Some("Device".into()),
+                    description: Some("Device".into()),
+                    is_root: None,
+                    is_online: Some(true),
+                    schema_identifiers: None,
+                    template_reference: None,
+                }),
+                children: None,
+            })),
+        )]));
+        let input = vec![
+            0x60, 0x28, 0x6b, 0x26, 0xa0, 0x24, 0x63, 0x22, 0xa0, 0x3, 0x2, 0x1, 0x1, 0xa1, 0x1b,
+            0x31, 0x19, 0xa0, 0x8, 0xc, 0x6, 0x44, 0x65, 0x76, 0x69, 0x63, 0x65, 0xa1, 0x8, 0xc,
+            0x6, 0x44, 0x65, 0x76, 0x69, 0x63, 0x65, 0xa3, 0x3, 0x1, 0x1, 0xff,
+        ];
+        let decoded = ber::decode::<Root>(&input).unwrap();
+
+        assert_eq!(expected, decoded);
+    }
+
+    #[test]
+    fn node_is_encoded_correctly() {
+        let node = Root::Elements(RootElementCollection(vec![TaggedRootElement(
+            RootElement::Element(Element::Node(Node {
+                number: 1,
+                contents: Some(NodeContents {
+                    identifier: Some("Device".into()),
+                    description: Some("Device".into()),
+                    is_root: None,
+                    is_online: Some(true),
+                    schema_identifiers: None,
+                    template_reference: None,
+                }),
+                children: None,
+            })),
+        )]));
+        let expected = vec![
+            0x60, 0x28, 0x6b, 0x26, 0xa0, 0x24, 0x63, 0x22, 0xa0, 0x3, 0x2, 0x1, 0x1, 0xa1, 0x1b,
+            0x31, 0x19, 0xa0, 0x8, 0xc, 0x6, 0x44, 0x65, 0x76, 0x69, 0x63, 0x65, 0xa1, 0x8, 0xc,
+            0x6, 0x44, 0x65, 0x76, 0x69, 0x63, 0x65, 0xa3, 0x3, 0x1, 0x1, 0xff,
+        ];
+        let encoded = ber::encode(&node).unwrap();
+
+        assert_eq!(expected, encoded);
+    }
+
     fn xl_root() -> Root {
         let command = Command::get_directory(Some(FieldFlags::All));
         let element = wrapped_element(75, Element::Command(command));
-        Root::Elements(RootElementCollection(vec![RootElement::Element(element)]))
+        Root::Elements(RootElementCollection(vec![TaggedRootElement(
+            RootElement::Element(element),
+        )]))
     }
 
     fn xxl_root() -> Root {
         let command = Command::get_directory(Some(FieldFlags::All));
         let element = wrapped_element(150, Element::Command(command));
-        Root::Elements(RootElementCollection(vec![RootElement::Element(element)]))
+        Root::Elements(RootElementCollection(vec![TaggedRootElement(
+            RootElement::Element(element),
+        )]))
     }
 
     fn wrapped_element(size: usize, content: Element) -> Element {
@@ -847,7 +1530,7 @@ mod test {
             element = Element::Node(Node {
                 number: i as i32,
                 contents: None,
-                children: Some(ElementCollection(vec![element])),
+                children: Some(ElementCollection(vec![TaggedElement(element)])),
             })
         }
         element

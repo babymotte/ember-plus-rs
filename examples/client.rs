@@ -15,50 +15,33 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use ember_plus_rs::{
-    consumer::start_tcp_consumer,
-    error::EmberResult,
-    glow::{Command, FieldFlags, Root, TreeNode},
-};
-use tracing::{error, info};
+use ember_plus_rs::{consumer::start_tcp_consumer, error::EmberResult};
+use tokio_util::sync::CancellationToken;
+use tracing::info;
 
 #[tokio::main]
 async fn main() -> EmberResult<()> {
     tracing_subscriber::fmt().init();
 
-    let (tx, mut rx) = start_tcp_consumer(
+    let cancel = CancellationToken::new();
+
+    let consumer = start_tcp_consumer(
         "127.0.0.1:9000".parse().expect("malformed socket address"),
         // Some(Duration::from_secs(1)),
         None,
         false,
+        cancel.clone(),
     )
     .await?;
 
-    let msg = Root::from(Command::get_directory(Some(FieldFlags::All)));
+    let mut rx = consumer.fetch_full_tree().await;
 
-    tx.send(msg).await.ok();
-
-    while let Some(msg) = rx.recv().await {
-        info!("Received ember message: {msg:?}");
-        // TODO
+    while let Some((parent, node)) = rx.recv().await {
+        info!("Received node: {:?}: {:?}", parent, node);
     }
+
+    cancel.cancelled().await;
+    info!("Client closed.");
 
     Ok(())
-}
-
-fn recursive_get_directory<'a>(
-    path: &[u32],
-    node: TreeNode<'a>,
-    consumer: impl Fn(&[u32], TreeNode),
-) {
-    match node {
-        TreeNode::Node(node) => todo!(),
-        TreeNode::QualifiedNode(qualified_node) => todo!(),
-        TreeNode::Matrix(matrix) => todo!(),
-        TreeNode::QualifiedMatrix(qualified_matrix) => todo!(),
-        TreeNode::Parameter(parameter) => todo!(),
-        TreeNode::QualifiedParameter(qualified_parameter) => todo!(),
-        TreeNode::Template(template) => todo!(),
-        TreeNode::QualifiedTemplate(qualified_template) => todo!(),
-    }
 }
