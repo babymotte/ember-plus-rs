@@ -344,8 +344,6 @@ impl NonEscapingS101Frame {
             1
         } else if len <= u16::MAX as usize {
             2
-        } else if len <= u32::MAX as usize {
-            4
         } else {
             panic!("max message size exceeded")
         };
@@ -362,16 +360,8 @@ impl NonEscapingS101Frame {
             buf[2] = payload_len as u8;
         } else if payload_len <= u16::MAX as usize {
             buf[1] = 0x02;
-            for (i, b) in (payload_len as u16).to_le_bytes().iter().enumerate() {
-                buf[2 + i] = *b;
-            }
-        } else if payload_len <= u32::MAX as usize {
-            buf[1] = 0x04;
-            for (i, b) in (payload_len as u32).to_le_bytes().iter().enumerate() {
-                buf[2 + i] = *b;
-            }
+            buf[2..4].copy_from_slice(&(payload_len as u16).to_le_bytes());
         } else {
-            // TODO what is the max message size according to spec?
             panic!("max message size exceeded")
         };
 

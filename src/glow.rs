@@ -15,9 +15,9 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-pub use ext::*;
-
 use rasn::{AsnType, Decode, Decoder, Encode, Encoder, types::ObjectIdentifier};
+
+pub use ext::*;
 
 // =============================
 // Primitive aliases
@@ -633,10 +633,34 @@ pub enum RootElement {
 
 mod ext {
 
+    use crate::{
+        ember::{EmberPacket, MAX_PAYLOAD_LEN},
+        error::EmberResult,
+        s101::Flags,
+    };
+
     use super::*;
+    use rasn::ber;
+    use tracing::error;
 
     pub const GLOW_VERSION_MAJOR: u8 = 2;
     pub const GLOW_VERSION_MINOR: u8 = 50;
+
+    pub trait ToGlow {
+        fn to_glow(&self) -> Option<Root>;
+    }
+
+    impl<A: AsRef<[u8]>> ToGlow for A {
+        fn to_glow(&self) -> Option<Root> {
+            match ber::decode::<Root>(self.as_ref()) {
+                Ok(it) => Some(it),
+                Err(e) => {
+                    error!("Error decoding Glow root element: {e}");
+                    None
+                }
+            }
+        }
+    }
 
     impl Command {
         pub fn get_directory(flags: Option<FieldFlags>) -> Self {
@@ -654,10 +678,70 @@ mod ext {
             )]))
         }
     }
+
+    impl Root {
+        pub fn to_packets(&self) -> EmberResult<Vec<EmberPacket>> {
+            let payload = ber::encode(self)?;
+            let packet_count = if payload.len() == 0 {
+                0
+            } else {
+                1 + payload.len() / MAX_PAYLOAD_LEN
+            };
+            let mut packets = Vec::with_capacity(packet_count);
+            for i in 0..packet_count {
+                packets.push(EmberPacket::new(
+                    Self::flag(packet_count, i),
+                    GLOW_VERSION_MAJOR,
+                    GLOW_VERSION_MINOR,
+                    payload[i * MAX_PAYLOAD_LEN..((i + 1) * MAX_PAYLOAD_LEN).min(payload.len())]
+                        .to_owned(),
+                ));
+            }
+            Ok(packets)
+        }
+
+        pub fn from_packets(packets: &[EmberPacket]) -> EmberResult<Root> {
+            let reconstructed_payload = packets
+                .iter()
+                .map(|p| p.payload())
+                .flatten()
+                .map(|it| *it)
+                .collect::<Vec<u8>>();
+            let root = ber::decode::<Root>(&reconstructed_payload)?;
+            Ok(root)
+        }
+
+        fn flag(packet_count: usize, packet_index: usize) -> Flags {
+            if packet_count < 1 {
+                Flags::EmptyPacket
+            } else if packet_count == 1 {
+                Flags::SinglePacket
+            } else if packet_index == 0 {
+                Flags::MultiPacketFirst
+            } else if packet_index == packet_count - 1 {
+                Flags::MultiPacketLast
+            } else {
+                Flags::MultiPacket
+            }
+        }
+    }
+
+    pub enum TreeNode<'a> {
+        Node(&'a Node),
+        QualifiedNode(&'a QualifiedNode),
+        Matrix(&'a Matrix),
+        QualifiedMatrix(&'a QualifiedMatrix),
+        Parameter(&'a Parameter),
+        QualifiedParameter(&'a QualifiedParameter),
+        Template(&'a Template),
+        QualifiedTemplate(&'a QualifiedTemplate),
+    }
 }
 
 #[cfg(test)]
 mod test {
+    use crate::s101::{Flags, NonEscapingS101Frame};
+
     use super::*;
     use rasn::ber;
 
@@ -694,5 +778,78 @@ mod test {
         let decoded = ber::decode::<Root>(&input).unwrap();
         let expected = Root::from(Command::get_directory(Some(FieldFlags::All)));
         assert_eq!(expected, decoded);
+    }
+
+    #[test]
+    fn to_single_packet_works() {
+        let original = Root::from(Command::get_directory(Some(FieldFlags::All)));
+        let packets = original.to_packets().unwrap();
+        assert_eq!(1, packets.len());
+        assert_eq!(Flags::SinglePacket, packets[0].flag());
+        let mut buf = [0u8; 1290];
+        for p in packets.clone() {
+            let frame = NonEscapingS101Frame::EmberPacket(p);
+            frame.encode(&mut buf);
+        }
+        let reconstructed = Root::from_packets(&packets).unwrap();
+        assert_eq!(original, reconstructed);
+    }
+
+    #[test]
+    fn to_two_packets_works() {
+        let original = xl_root();
+        let packets = original.to_packets().unwrap();
+        assert_eq!(2, packets.len());
+        assert_eq!(Flags::MultiPacketFirst, packets[0].flag());
+        assert_eq!(Flags::MultiPacketLast, packets[1].flag());
+        let mut buf = [0u8; 1290];
+        for p in packets.clone() {
+            let frame = NonEscapingS101Frame::EmberPacket(p);
+            frame.encode(&mut buf);
+        }
+        let reconstructed = Root::from_packets(&packets).unwrap();
+        assert_eq!(original, reconstructed);
+    }
+
+    #[test]
+    fn to_multi_packets_works() {
+        let original = xxl_root();
+        let packets = original.to_packets().unwrap();
+        assert_eq!(4, packets.len());
+        assert_eq!(Flags::MultiPacketFirst, packets[0].flag());
+        assert_eq!(Flags::MultiPacket, packets[1].flag());
+        assert_eq!(Flags::MultiPacket, packets[2].flag());
+        assert_eq!(Flags::MultiPacketLast, packets[3].flag());
+        let mut buf = [0u8; 1290];
+        for p in packets.clone() {
+            let frame = NonEscapingS101Frame::EmberPacket(p);
+            frame.encode(&mut buf);
+        }
+        let reconstructed = Root::from_packets(&packets).unwrap();
+        assert_eq!(original, reconstructed);
+    }
+
+    fn xl_root() -> Root {
+        let command = Command::get_directory(Some(FieldFlags::All));
+        let element = wrapped_element(75, Element::Command(command));
+        Root::Elements(RootElementCollection(vec![RootElement::Element(element)]))
+    }
+
+    fn xxl_root() -> Root {
+        let command = Command::get_directory(Some(FieldFlags::All));
+        let element = wrapped_element(150, Element::Command(command));
+        Root::Elements(RootElementCollection(vec![RootElement::Element(element)]))
+    }
+
+    fn wrapped_element(size: usize, content: Element) -> Element {
+        let mut element = content;
+        for i in 0..size {
+            element = Element::Node(Node {
+                number: i as i32,
+                contents: None,
+                children: Some(ElementCollection(vec![element])),
+            })
+        }
+        element
     }
 }

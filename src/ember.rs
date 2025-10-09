@@ -17,13 +17,10 @@
 
 use crate::{
     error::{EmberError, EmberResult},
-    glow::{GLOW_VERSION_MAJOR, GLOW_VERSION_MINOR, Root},
     s101::Flags,
 };
-use rasn::ber;
 
-// TODO figure out correct max payload len
-const MAX_PAYLOAD_LEN: usize = usize::MAX;
+pub const MAX_PAYLOAD_LEN: usize = 1024;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct EmberPacket {
@@ -49,6 +46,10 @@ impl EmberPacket {
 
     pub fn set_flag(&mut self, flag: Flags) {
         self.flag = flag;
+    }
+
+    pub fn flag(&self) -> Flags {
+        self.flag
     }
 
     pub fn set_glow_dtd_version(&mut self, major: u8, minor: u8) {
@@ -100,24 +101,5 @@ impl EmberPacket {
             glow_version_maj: buf[4],
             payload: buf[5..].to_vec(),
         })
-    }
-}
-
-impl TryFrom<Root> for EmberPacket {
-    type Error = EmberError;
-
-    fn try_from(value: Root) -> Result<Self, Self::Error> {
-        let payload = ber::encode(&value)?;
-        if payload.len() > MAX_PAYLOAD_LEN {
-            // TODO split into multiple frames
-            todo!()
-        } else {
-            Ok(EmberPacket::new(
-                Flags::SinglePacket,
-                GLOW_VERSION_MAJOR,
-                GLOW_VERSION_MINOR,
-                payload,
-            ))
-        }
     }
 }

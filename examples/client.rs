@@ -17,11 +17,9 @@
 
 use ember_plus_rs::{
     consumer::start_tcp_consumer,
-    ember::EmberPacket,
     error::EmberResult,
-    glow::{Command, FieldFlags, Root},
+    glow::{Command, FieldFlags, Root, TreeNode},
 };
-use rasn::ber;
 use tracing::{error, info};
 
 #[tokio::main]
@@ -36,23 +34,31 @@ async fn main() -> EmberResult<()> {
     )
     .await?;
 
-    tx.send(EmberPacket::try_from(Root::from(Command::get_directory(
-        Some(FieldFlags::All),
-    )))?)
-    .await
-    .ok();
+    let msg = Root::from(Command::get_directory(Some(FieldFlags::All)));
 
-    while let Some(packet) = rx.recv().await {
-        let root = match ber::decode::<Root>(packet.payload()) {
-            Ok(it) => it,
-            Err(e) => {
-                error!("Error decoding glow root: {e}");
-                continue;
-            }
-        };
+    tx.send(msg).await.ok();
 
-        info!("Received root: {root:?}");
+    while let Some(msg) = rx.recv().await {
+        info!("Received ember message: {msg:?}");
+        // TODO
     }
 
     Ok(())
+}
+
+fn recursive_get_directory<'a>(
+    path: &[u32],
+    node: TreeNode<'a>,
+    consumer: impl Fn(&[u32], TreeNode),
+) {
+    match node {
+        TreeNode::Node(node) => todo!(),
+        TreeNode::QualifiedNode(qualified_node) => todo!(),
+        TreeNode::Matrix(matrix) => todo!(),
+        TreeNode::QualifiedMatrix(qualified_matrix) => todo!(),
+        TreeNode::Parameter(parameter) => todo!(),
+        TreeNode::QualifiedParameter(qualified_parameter) => todo!(),
+        TreeNode::Template(template) => todo!(),
+        TreeNode::QualifiedTemplate(qualified_template) => todo!(),
+    }
 }

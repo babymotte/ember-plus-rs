@@ -16,12 +16,10 @@
  */
 
 use ember_plus_rs::{
-    ember::EmberPacket,
     error::EmberResult,
     glow::Root,
     provider::{ClientHandler, start_tcp_provider},
 };
-use rasn::ber;
 use std::future::pending;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -33,21 +31,12 @@ struct EmberClientHandler {}
 impl ClientHandler for EmberClientHandler {
     async fn handle_client(
         &self,
-        tx: mpsc::Sender<EmberPacket>,
-        mut rx: mpsc::Receiver<EmberPacket>,
+        tx: mpsc::Sender<Root>,
+        mut rx: mpsc::Receiver<Root>,
     ) -> EmberResult<()> {
         while let Some(msg) = rx.recv().await {
-            trace!("Received ember packet: {msg:?}");
-
-            let root = match ber::decode::<Root>(msg.payload()) {
-                Ok(it) => it,
-                Err(e) => {
-                    error!("Could not decode Glow Root element: {e}");
-                    continue;
-                }
-            };
-
-            trace!("Received Glow Root element: {root:?}");
+            info!("Received ember message: {msg:?}");
+            // TODO
         }
 
         Ok(())

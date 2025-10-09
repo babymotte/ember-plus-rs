@@ -15,7 +15,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::{com::ember_server_channel, ember::EmberPacket, error::EmberResult};
+use crate::{com::ember_server_channel, error::EmberResult, glow::Root};
 use std::{io, net::SocketAddr, time::Duration};
 use tokio::{net::TcpListener, select, spawn, sync::mpsc};
 use tokio_util::sync::CancellationToken;
@@ -24,8 +24,8 @@ use tracing::{error, info};
 pub trait ClientHandler: Clone + Send + Sync + 'static {
     fn handle_client(
         &self,
-        tx: mpsc::Sender<EmberPacket>,
-        rx: mpsc::Receiver<EmberPacket>,
+        tx: mpsc::Sender<Root>,
+        rx: mpsc::Receiver<Root>,
     ) -> impl Future<Output = EmberResult<()>> + Send;
 }
 
@@ -114,8 +114,8 @@ async fn client_connected(
 async fn serve(
     client_handler: impl ClientHandler,
     addr: SocketAddr,
-    ember_tx: mpsc::Sender<EmberPacket>,
-    ember_rx: mpsc::Receiver<EmberPacket>,
+    ember_tx: mpsc::Sender<Root>,
+    ember_rx: mpsc::Receiver<Root>,
 ) {
     spawn(async move {
         if let Err(e) = client_handler.handle_client(ember_tx, ember_rx).await {

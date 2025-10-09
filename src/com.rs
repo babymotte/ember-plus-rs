@@ -18,7 +18,8 @@
 use crate::{
     ember::EmberPacket,
     error::EmberError,
-    s101::{EscapingS101Frame, NonEscapingS101Frame, S101Frame},
+    glow::Root,
+    s101::{EscapingS101Frame, Flags, NonEscapingS101Frame, S101Frame},
 };
 use std::time::Duration;
 use tokio::{
@@ -33,13 +34,13 @@ use tokio::{
 };
 use tracing::{debug, error, trace, warn};
 
-const ENCODE_BUFFER_SIZE: usize = 65536;
+const ENCODE_BUFFER_SIZE: usize = 1290;
 
 pub async fn ember_client_channel(
     keepalive: Option<Duration>,
     socket: TcpStream,
     try_use_non_escaping: bool,
-) -> Result<(mpsc::Sender<EmberPacket>, mpsc::Receiver<EmberPacket>), EmberError> {
+) -> Result<(mpsc::Sender<Root>, mpsc::Receiver<Root>), EmberError> {
     ember_channel(keepalive, socket, try_use_non_escaping, true).await
 }
 
@@ -47,7 +48,7 @@ pub async fn ember_server_channel(
     keepalive: Option<Duration>,
     socket: TcpStream,
     use_non_escaping: bool,
-) -> Result<(mpsc::Sender<EmberPacket>, mpsc::Receiver<EmberPacket>), EmberError> {
+) -> Result<(mpsc::Sender<Root>, mpsc::Receiver<Root>), EmberError> {
     ember_channel(keepalive, socket, use_non_escaping, false).await
 }
 
@@ -56,12 +57,18 @@ async fn ember_channel(
     mut socket: TcpStream,
     try_use_non_escaping: bool,
     negotiate: bool,
-) -> Result<(mpsc::Sender<EmberPacket>, mpsc::Receiver<EmberPacket>), EmberError> {
-    let mut encode_buf = [0u8; 65536];
+) -> Result<(mpsc::Sender<Root>, mpsc::Receiver<Root>), EmberError> {
+    let mut encode_buf = [0u8; ENCODE_BUFFER_SIZE];
     let out_buf = Vec::new();
 
-    let (send_tx, send_rx) = mpsc::channel(1024);
-    let (receive_tx, receive_rx) = mpsc::channel(1024);
+    let channel_buf_size = 1024;
+
+    let (packetize_tx, packetize_rx) = mpsc::channel(channel_buf_size);
+    let (frame_tx, frame_rx) = mpsc::channel(channel_buf_size);
+    let (send_tx, send_rx) = mpsc::channel(channel_buf_size);
+    let (receive_tx, receive_rx) = mpsc::channel(channel_buf_size);
+    let (unframe_tx, unframe_rx) = mpsc::channel(channel_buf_size);
+    let (depacketize_tx, depacketize_rx) = mpsc::channel(channel_buf_size);
 
     let use_non_escaping = if negotiate {
         try_use_non_escaping
@@ -71,7 +78,7 @@ async fn ember_channel(
     };
 
     let (sock_rx, sock_tx) = socket.into_split();
-    let (keepalive_tx, keepalive_request_rx) = mpsc::channel(1);
+    let (keepalive_tx, keepalive_request_rx) = mpsc::channel(channel_buf_size);
 
     if let Some(keepalive) = keepalive {
         spawn(send_keepalive(
@@ -87,16 +94,15 @@ async fn ember_channel(
             use_non_escaping,
         ));
     }
+
+    spawn(packetize(packetize_rx, frame_tx));
+    spawn(frame(frame_rx, send_tx, use_non_escaping));
     spawn(send(send_rx, sock_tx, encode_buf, out_buf));
     spawn(receive(sock_rx, receive_tx, keepalive_tx));
+    spawn(unframe(receive_rx, unframe_tx));
+    spawn(depacketize(unframe_rx, depacketize_tx));
 
-    let (wrapper_tx, wrapper_rx) = mpsc::channel(1);
-    let (unwrapper_tx, unwrapper_rx) = mpsc::channel(1);
-
-    spawn(wrap(wrapper_rx, send_tx, use_non_escaping));
-    spawn(unwrap(receive_rx, unwrapper_tx));
-
-    Ok((wrapper_tx, unwrapper_rx))
+    Ok((packetize_tx, depacketize_rx))
 }
 
 async fn send_keepalive(
@@ -233,12 +239,34 @@ async fn receive(
     debug!("Receive loop stopped.");
 }
 
-async fn wrap(
+async fn packetize(mut rx: mpsc::Receiver<Root>, tx: mpsc::Sender<EmberPacket>) {
+    debug!("Starting packetize loop.");
+
+    while let Some(msg) = rx.recv().await {
+        let packets = match msg.to_packets() {
+            Ok(it) => it,
+            Err(e) => {
+                error!("Error packetizing ember message: {e}");
+                continue;
+            }
+        };
+
+        for packet in packets {
+            if tx.send(packet).await.is_err() {
+                break;
+            }
+        }
+    }
+
+    debug!("Packetize loop stopped.");
+}
+
+async fn frame(
     mut rx: mpsc::Receiver<EmberPacket>,
     tx: mpsc::Sender<S101Frame>,
     use_non_escaping: bool,
 ) {
-    debug!("Starting wrap loop.");
+    debug!("Starting frame loop.");
 
     while let Some(packet) = rx.recv().await {
         let frame = if use_non_escaping {
@@ -251,11 +279,11 @@ async fn wrap(
         }
     }
 
-    debug!("Wrap loop stopped.");
+    debug!("Frame loop stopped.");
 }
 
-async fn unwrap(mut rx: mpsc::Receiver<S101Frame>, tx: mpsc::Sender<EmberPacket>) {
-    debug!("Starting unwrap loop.");
+async fn unframe(mut rx: mpsc::Receiver<S101Frame>, tx: mpsc::Sender<EmberPacket>) {
+    debug!("Starting unframe loop.");
 
     while let Some(frame) = rx.recv().await {
         match frame {
@@ -269,7 +297,54 @@ async fn unwrap(mut rx: mpsc::Receiver<S101Frame>, tx: mpsc::Sender<EmberPacket>
         }
     }
 
-    debug!("Unwrap loop stopped.");
+    debug!("Unframe loop stopped.");
+}
+
+async fn depacketize(mut rx: mpsc::Receiver<EmberPacket>, tx: mpsc::Sender<Root>) {
+    debug!("Starting de-packetize loop.");
+
+    let mut buf = Vec::new();
+
+    while let Some(packet) = rx.recv().await {
+        let root = match packet.flag() {
+            Flags::SinglePacket => {
+                let root = match Root::from_packets(&[packet]) {
+                    Ok(it) => it,
+                    Err(e) => {
+                        error!("Error de-packetizing ember message: {e}");
+                        continue;
+                    }
+                };
+                Some(root)
+            }
+            Flags::MultiPacketFirst | Flags::MultiPacket => {
+                buf.push(packet);
+                None
+            }
+            Flags::MultiPacketLast => {
+                let mut packets = buf;
+                buf = Vec::new();
+                packets.push(packet);
+                let root = match Root::from_packets(&packets) {
+                    Ok(it) => it,
+                    Err(e) => {
+                        error!("Error de-packetizing ember message: {e}");
+                        continue;
+                    }
+                };
+                Some(root)
+            }
+            Flags::EmptyPacket => None,
+        };
+
+        if let Some(root) = root {
+            if tx.send(root).await.is_err() {
+                break;
+            }
+        };
+    }
+
+    debug!("De-packetize loop stopped.");
 }
 
 async fn negotiate_non_escaping(
