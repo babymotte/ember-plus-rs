@@ -15,19 +15,32 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use ember_plus_rs::{consumer::start_tcp_consumer, error::EmberResult};
+use ember_plus_rs::{
+    consumer::start_tcp_consumer,
+    error::EmberResult,
+    glow::{RelativeOid, TreeNode, Value},
+};
+use miette::Result;
 use tokio::select;
 use tokio_util::sync::CancellationToken;
+#[cfg(feature = "tracing")]
 use tracing::info;
+use worterbuch_client::Worterbuch;
 
 #[tokio::main]
-async fn main() -> EmberResult<()> {
+async fn main() -> Result<()> {
+    #[cfg(feature = "tracing")]
     logging::init();
+
+    let (wb, _, _) = worterbuch_client::connect_with_default_config().await?;
+    wb.set_grave_goods(&["ember/#"]).await?;
 
     let shutdown_token = CancellationToken::new();
 
     let consumer = start_tcp_consumer(
-        "127.0.0.1:9000".parse().expect("malformed socket address"),
+        "10.230.31.159:9000"
+            .parse()
+            .expect("malformed socket address"),
         // Some(Duration::from_secs(1)),
         None,
         false,
@@ -39,19 +52,52 @@ async fn main() -> EmberResult<()> {
 
     loop {
         select! {
-            Some((oid, node)) = rx.recv() => {
-                info!("Received change in node {}: {:?}", oid, node);
-            },
+            Some((parent, node)) = rx.recv() => process_event(parent, node, &wb).await?,
             _ = shutdown_token.cancelled() => break,
             else => break,
         }
     }
 
+    #[cfg(feature = "tracing")]
     info!("Client closed.");
 
     Ok(())
 }
 
+async fn process_event(parent: RelativeOid, node: TreeNode, wb: &Worterbuch) -> Result<()> {
+    let oid = node.oid(&parent);
+
+    #[cfg(feature = "tracing")]
+    info!("Got update for content of node {parent}: {node:?}");
+
+    match node {
+        TreeNode::Parameter(param) => {
+            if let Some(value) = param.value() {
+                publish(oid, value, wb).await?;
+            }
+        }
+        TreeNode::QualifiedParameter(param) => {
+            if let Some(value) = param.value() {
+                publish(oid, value, wb).await?;
+            }
+        }
+        _ => {}
+    }
+
+    Ok(())
+}
+
+async fn publish(oid: RelativeOid, value: Value, wb: &Worterbuch) -> Result<()> {
+    let key = key(oid);
+    wb.set(key, value).await?;
+    Ok(())
+}
+
+fn key(oid: RelativeOid) -> String {
+    format!("ember{}", oid.to_string().replace(".", "/"))
+}
+
+#[cfg(feature = "tracing")]
 mod logging {
     use std::io;
     use supports_color::Stream;

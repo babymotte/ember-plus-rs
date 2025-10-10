@@ -23,6 +23,7 @@ use ember_plus_rs::{
 use std::future::pending;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
+#[cfg(feature = "tracing")]
 use tracing::{error, info, trace};
 
 #[derive(Debug, Clone)]
@@ -35,6 +36,7 @@ impl ClientHandler for EmberClientHandler {
         mut rx: mpsc::Receiver<Root>,
     ) -> EmberResult<()> {
         while let Some(msg) = rx.recv().await {
+            #[cfg(feature = "tracing")]
             trace!("Received ember message: {msg:?}");
             // TODO
         }
@@ -45,6 +47,7 @@ impl ClientHandler for EmberClientHandler {
 
 #[tokio::main]
 async fn main() -> EmberResult<()> {
+    #[cfg(feature = "tracing")]
     logging::init();
 
     let local_addr = "0.0.0.0:9000".parse().expect("malformed socket address");
@@ -67,6 +70,7 @@ async fn main() -> EmberResult<()> {
     Ok(())
 }
 
+#[cfg(feature = "tracing")]
 mod logging {
     use std::io;
     use supports_color::Stream;

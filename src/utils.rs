@@ -1,3 +1,9 @@
+use std::{
+    alloc::System,
+    path::{Path, PathBuf},
+    time::{Instant, SystemTime},
+};
+
 use crate::glow::{Integer32, RelativeOid};
 
 #[macro_export]
@@ -38,4 +44,30 @@ pub fn format_bytes(bytes: &[u8]) -> String {
             .collect::<Vec<String>>()
             .join(", ")
     )
+}
+
+pub fn format_byte_size(bytes: usize) -> String {
+    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
+    let mut size = bytes as f64;
+    let mut unit = 0;
+
+    while size >= 1024.0 && unit < UNITS.len() - 1 {
+        size /= 1024.0;
+        unit += 1;
+    }
+
+    if unit == 0 {
+        format!("{:.0} {}", size, UNITS[unit])
+    } else {
+        format!("{:.1} {}", size, UNITS[unit])
+    }
+}
+
+pub fn dump_file_path() -> PathBuf {
+    let now = SystemTime::now();
+    let timestamp = now
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .expect("clock is broken")
+        .as_millis();
+    PathBuf::from(".").join(format!("{timestamp}.ember"))
 }

@@ -17,6 +17,7 @@
 
 pub use ext::*;
 use rasn::{AsnType, Decode, Decoder, Encode, Encoder, de::Error};
+use serde::{Deserialize, Serialize};
 
 // =============================
 // Primitive aliases
@@ -134,8 +135,9 @@ pub struct ParameterContents {
     pub template_reference: Option<RelativeOid>,
 }
 
-#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode, Serialize, Deserialize)]
 #[rasn(choice)]
+#[serde(untagged)]
 pub enum Value {
     #[rasn(tag(universal, 2))] // INTEGER
     Integer(Integer64),
@@ -684,11 +686,16 @@ mod ext {
         ember::{EmberPacket, MAX_PAYLOAD_LEN},
         error::EmberResult,
         s101::Flags,
-        utils::join,
+        utils::{dump_file_path, format_byte_size, join},
     };
     use rasn::{Codec, ber};
-    use std::fmt::{self, Debug};
-    use tracing::error;
+    use std::{
+        fmt::{self, Debug},
+        time::Instant,
+    };
+    use tokio::{fs, spawn};
+    #[cfg(feature = "tracing")]
+    use tracing::{error, warn};
 
     pub const GLOW_VERSION_MAJOR: u8 = 2;
     pub const GLOW_VERSION_MINOR: u8 = 50;
@@ -702,6 +709,7 @@ mod ext {
             match ber::decode::<Root>(self.as_ref()) {
                 Ok(it) => Some(it),
                 Err(e) => {
+                    #[cfg(feature = "tracing")]
                     error!("Error decoding Glow root element: {e}");
                     None
                 }
@@ -754,7 +762,33 @@ mod ext {
                 .flatten()
                 .map(|it| *it)
                 .collect::<Vec<u8>>();
+            if packets.len() >= 500 {
+                let reconstructed_payload = reconstructed_payload.clone();
+                spawn(async move {
+                    let file_path = dump_file_path();
+                    #[cfg(feature = "tracing")]
+                    warn!("Dumping message to disk: {}", file_path.display());
+                    #[cfg(feature = "tracing")]
+                    if let Err(e) = fs::write(&file_path, &reconstructed_payload).await {
+                        warn!("Could not dump payload to {}: {e}", file_path.display());
+                    }
+                    #[cfg(not(feature = "tracing"))]
+                    fs::write(file_path, &reconstructed_payload).await.ok();
+                });
+            }
+            #[cfg(feature = "tracing")]
+            let start = Instant::now();
             let root = ber::decode::<Root>(&reconstructed_payload)?;
+            #[cfg(feature = "tracing")]
+            let end = Instant::now();
+            if packets.len() >= 500 {
+                #[cfg(feature = "tracing")]
+                warn!(
+                    "Total payload size of multi-packet message: {}; decoding took {:.2} seconds",
+                    format_byte_size(reconstructed_payload.len()),
+                    (end - start).as_millis() as f32 / 1_000.0
+                );
+            }
             Ok(root)
         }
 
@@ -1046,6 +1080,10 @@ mod ext {
             };
             contents.is_online.unwrap_or(false)
         }
+
+        pub fn value(&self) -> Option<Value> {
+            self.contents.clone().and_then(|c| c.param_value.clone())
+        }
     }
 
     impl QualifiedParameter {
@@ -1068,6 +1106,10 @@ mod ext {
                 return false;
             };
             contents.is_online.unwrap_or(false)
+        }
+
+        pub fn value(&self) -> Option<Value> {
+            self.contents.clone().and_then(|c| c.param_value.clone())
         }
     }
 
@@ -1217,6 +1259,8 @@ mod ext {
 
 #[cfg(test)]
 mod test {
+    use std::{fs, time::Instant};
+
     use crate::s101::{Flags, NonEscapingS101Frame};
 
     use super::*;
@@ -1596,6 +1640,17 @@ mod test {
         let encoded = ber::encode(&node).unwrap();
 
         assert_eq!(expected, encoded);
+    }
+
+    #[test]
+    fn big_message_is_decoded_in_reasonable_time() {
+        let data = std::fs::read("./test/big.EmBER").unwrap();
+        let start = std::time::Instant::now();
+        let result = std::panic::catch_unwind(|| rasn::ber::decode::<Root>(&data));
+        let elapsed = start.elapsed();
+        eprintln!("decode took {:?}", elapsed);
+        assert!(result.is_ok());
+        assert!(elapsed.as_millis() < 1000);
     }
 
     fn xl_root() -> Root {

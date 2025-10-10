@@ -27,6 +27,7 @@ use std::{
 };
 use tokio::{net::TcpStream, select, spawn, sync::mpsc};
 use tokio_util::sync::CancellationToken;
+#[cfg(feature = "tracing")]
 use tracing::{debug, error, trace, warn};
 
 pub type NodeCallback = mpsc::Sender<(RelativeOid, TreeNode)>;
@@ -93,6 +94,7 @@ impl EmberConsumer {
         spawn(async move {
             let cancel = consumer.shutdown_token.clone();
             if let Err(e) = consumer.run(api_rx).await {
+                #[cfg(feature = "tracing")]
                 error!("Error in Ember+ consumer: {e}");
                 cancel.cancel();
             }
@@ -124,6 +126,7 @@ impl EmberConsumer {
     }
 
     async fn process_ember_message(&mut self, msg: Root) -> EmberResult<()> {
+        #[cfg(feature = "tracing")]
         trace!("Received ember message: {msg:?}");
 
         match msg {
@@ -148,6 +151,7 @@ impl EmberConsumer {
                             }
                             Element::Command(command) => {
                                 // TODO can a producer send commands to a consumer?
+                                #[cfg(feature = "tracing")]
                                 warn!("Received command from producer: {command:?}");
                             }
                             Element::Matrix(matrix) => {
@@ -159,6 +163,7 @@ impl EmberConsumer {
                             }
                             Element::Function(function) => {
                                 // TODO can a producer send functions to a consumer?
+                                #[cfg(feature = "tracing")]
                                 warn!("Received function from producer: {function:?}");
                             }
                             Element::Template(template) => {
@@ -198,6 +203,7 @@ impl EmberConsumer {
                         }
                         TaggedRootElement(RootElement::QualifiedFunction(qualified_function)) => {
                             // TODO can a producer send functions to a consumer?
+                            #[cfg(feature = "tracing")]
                             warn!(
                                 "Received qualified function from producer: {qualified_function:?}"
                             );
@@ -215,6 +221,7 @@ impl EmberConsumer {
                 }
                 for oid in used_recursive_fetch_callbacks {
                     self.recursive_fetch_callbacks.remove(&oid);
+                    #[cfg(feature = "tracing")]
                     debug!("Removed recursive fetch callback for {oid}");
                 }
             }
@@ -267,15 +274,19 @@ impl EmberConsumer {
     ) -> EmberResult<bool> {
         let oid = node.oid(&parent);
 
+        #[cfg(feature = "tracing")]
         debug!("Got content of node {parent}: {oid} {node:?}");
+
+        // TODO detect unknown nodes and traverse them automatically
 
         // this applies to non-leaf nodes in a tree structure
         if let Some((path, children)) = node.clone().children(&parent) {
+            #[cfg(feature = "tracing")]
             debug!("Node {oid} seems to be a container, processing children …");
-            // TODO check if node is already known and treat it like a full node if it is not
             let recursive_fetch_callback = self.recursive_fetch_callbacks.get(&path).cloned();
             let mut remove_recursive_fetch_callback = true;
             for node in children {
+                #[cfg(feature = "tracing")]
                 debug!("Processing child of {path}: {}", node.oid(&path));
                 remove_recursive_fetch_callback &= Box::pin(self.process_ember_node(
                     path.clone(),
@@ -285,6 +296,7 @@ impl EmberConsumer {
                 .await?;
             }
             if remove_recursive_fetch_callback {
+                #[cfg(feature = "tracing")]
                 debug!("Removing recursive fetch callback for node {parent}.");
                 self.recursive_fetch_callbacks.remove(&path);
             }
@@ -292,14 +304,17 @@ impl EmberConsumer {
         }
         // this applies to leaf nodes in a tree structure or to qualified nodes
         else {
+            #[cfg(feature = "tracing")]
             debug!("Looking up callbacks for node {oid} …");
 
             if let Some(callback) = self.permanent_callbacks.get(&parent) {
+                #[cfg(feature = "tracing")]
                 debug!("Found callback for node {oid}");
                 callback.send((parent.clone(), node.clone())).await.ok();
             }
 
             if let Some(callback) = recursive_fetch_callback {
+                #[cfg(feature = "tracing")]
                 debug!("Found recursive fetch callback for node {oid}");
                 callback.send((parent.clone(), node.clone())).await.ok();
             }
@@ -317,6 +332,7 @@ impl EmberConsumer {
         let Some((oid, request)) = node.clone().get_directory(&parent) else {
             return;
         };
+        #[cfg(feature = "tracing")]
         debug!("Fetching content of node {oid}: {node:?} using request: {request:?}");
         let api = self.api.clone();
 
@@ -328,6 +344,7 @@ impl EmberConsumer {
                 api.fetch_recursive(p, n, consumer.clone()).await;
             }
         });
+        #[cfg(feature = "tracing")]
         debug!("Adding recursive fetch callback for {oid} …");
         self.recursive_fetch_callbacks.insert(oid, tx);
         self.ember_sender.send(request).await.ok();
@@ -340,11 +357,13 @@ pub async fn start_tcp_consumer(
     try_use_non_escaping: bool,
     cancellation_token: CancellationToken,
 ) -> EmberResult<EmberConsumerApi> {
+    #[cfg(feature = "tracing")]
     debug!("Connecting to provider {provider_addr} …");
 
     let socket = TcpStream::connect(provider_addr).await?;
     socket.set_nodelay(true)?;
 
+    #[cfg(feature = "tracing")]
     debug!("Successfully connected.");
 
     let (tx, rx) = ember_client_channel(keepalive, socket, try_use_non_escaping).await?;

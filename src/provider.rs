@@ -19,6 +19,7 @@ use crate::{com::ember_server_channel, error::EmberResult, glow::Root};
 use std::{io, net::SocketAddr, time::Duration};
 use tokio::{net::TcpListener, select, spawn, sync::mpsc};
 use tokio_util::sync::CancellationToken;
+#[cfg(feature = "tracing")]
 use tracing::{error, info};
 
 pub trait ClientHandler: Clone + Send + Sync + 'static {
@@ -36,6 +37,7 @@ pub async fn start_tcp_provider(
     client_handler: impl ClientHandler,
     cancellation_token: CancellationToken,
 ) -> EmberResult<()> {
+    #[cfg(feature = "tracing")]
     info!("Starting provider at {local_addr} …");
 
     // TODO set up socket correctly
@@ -68,6 +70,7 @@ async fn accept_clients(
             }
             },
             _ = cancellation_token.cancelled() => {
+                #[cfg(feature = "tracing")]
                 info!("Received stop signal.");
                 break;
             },
@@ -86,6 +89,7 @@ async fn client_accepted(
             client_connected(keepalive, use_non_escaping, client_handler, client, addr).await;
         }
         Err(e) => {
+            #[cfg(feature = "tracing")]
             error!("Erro accpting client connection: {e}");
             return false;
         }
@@ -100,12 +104,14 @@ async fn client_connected(
     client: tokio::net::TcpStream,
     addr: SocketAddr,
 ) {
+    #[cfg(feature = "tracing")]
     info!("New client connected: {addr}");
     match ember_server_channel(keepalive, client, use_non_escaping).await {
         Ok((ember_tx, ember_rx)) => {
             serve(client_handler, addr, ember_tx, ember_rx).await;
         }
         Err(e) => {
+            #[cfg(feature = "tracing")]
             error!("Error establishing ember+ communication with client {addr}: {e}");
         }
     }
@@ -119,6 +125,7 @@ async fn serve(
 ) {
     spawn(async move {
         if let Err(e) = client_handler.handle_client(ember_tx, ember_rx).await {
+            #[cfg(feature = "tracing")]
             error!("Client connection {addr} closed unexpectedly: {e}");
         }
     });
