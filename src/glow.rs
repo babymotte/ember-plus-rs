@@ -687,7 +687,7 @@ mod ext {
         utils::join,
     };
     use rasn::{Codec, ber};
-    use std::fmt::Debug;
+    use std::fmt::{self, Debug};
     use tracing::error;
 
     pub const GLOW_VERSION_MAJOR: u8 = 2;
@@ -823,7 +823,7 @@ mod ext {
 
     #[derive(Debug, Clone)]
     pub enum TreeNode {
-        Empty,
+        Root,
         Node(Node),
         QualifiedNode(QualifiedNode),
         Matrix(Matrix),
@@ -835,83 +835,72 @@ mod ext {
     }
 
     impl TreeNode {
-        pub fn get_directory(self, parent_path: Option<&RelativeOid>) -> Option<Root> {
+        pub fn get_directory(self, parent_path: &RelativeOid) -> Option<(RelativeOid, Root)> {
             let command = Command::get_directory(Some(FieldFlags::All));
             match self {
-                TreeNode::Empty => Some(Root::command(command)),
+                TreeNode::Root => Some((RelativeOid::root(), Root::command(command))),
                 TreeNode::Node(node) => {
-                    if node.is_online() {
-                        Some(Root::qualified_node(QualifiedNode::command(
-                            join(parent_path, node.number),
-                            command,
-                        )))
-                    } else {
-                        None
-                    }
+                    let oid = join(parent_path, node.number);
+                    Some((
+                        oid.clone(),
+                        Root::qualified_node(QualifiedNode::command(oid, command)),
+                    ))
                 }
                 TreeNode::QualifiedNode(mut qualified_node) => {
-                    if qualified_node.is_online() {
-                        qualified_node.contents = None;
-                        qualified_node.children = Some(ElementCollection::command(command));
-                        Some(Root::qualified_node(qualified_node))
-                    } else {
-                        None
-                    }
+                    qualified_node.contents = None;
+                    qualified_node.children = Some(ElementCollection::command(command));
+                    let oid = qualified_node.path.clone();
+                    Some((oid, Root::qualified_node(qualified_node)))
                 }
-                TreeNode::Matrix(matrix) => Some(Root::qualified_matrix(QualifiedMatrix::command(
-                    join(parent_path, matrix.number),
-                    command,
-                ))),
+                TreeNode::Matrix(matrix) => {
+                    let oid = join(parent_path, matrix.number);
+                    Some((
+                        oid.clone(),
+                        Root::qualified_matrix(QualifiedMatrix::command(oid, command)),
+                    ))
+                }
                 TreeNode::QualifiedMatrix(mut qualified_matrix) => {
                     qualified_matrix.contents = None;
                     qualified_matrix.children = Some(ElementCollection::command(command));
-                    Some(Root::qualified_matrix(qualified_matrix))
+                    let oid = qualified_matrix.path.clone();
+                    Some((oid, Root::qualified_matrix(qualified_matrix)))
                 }
                 TreeNode::Parameter(parameter) => {
-                    if parameter.is_online() {
-                        Some(Root::qualified_parameter(QualifiedParameter::command(
-                            join(parent_path, parameter.number),
-                            command,
-                        )))
-                    } else {
-                        None
-                    }
+                    let oid = join(parent_path, parameter.number);
+                    Some((
+                        oid.clone(),
+                        Root::qualified_parameter(QualifiedParameter::command(oid, command)),
+                    ))
                 }
                 TreeNode::QualifiedParameter(mut qualified_parameter) => {
-                    if qualified_parameter.is_online() {
-                        qualified_parameter.contents = None;
-                        qualified_parameter.children = Some(ElementCollection::command(command));
-                        Some(Root::qualified_parameter(qualified_parameter))
-                    } else {
-                        None
-                    }
+                    qualified_parameter.contents = None;
+                    qualified_parameter.children = Some(ElementCollection::command(command));
+                    let oid = qualified_parameter.path.clone();
+                    Some((oid, Root::qualified_parameter(qualified_parameter)))
                 }
-                TreeNode::Template(_) => None,
-                TreeNode::QualifiedTemplate(_) => None,
+                TreeNode::Template(_) | TreeNode::QualifiedTemplate(_) => None,
             }
         }
 
-        pub fn oid(&self, parent: Option<&RelativeOid>) -> Option<RelativeOid> {
+        pub fn oid(&self, parent: &RelativeOid) -> RelativeOid {
             match self {
-                TreeNode::Empty => None,
-                TreeNode::Node(node) => Some(join(parent, node.number)),
-                TreeNode::QualifiedNode(qualified_node) => Some(qualified_node.path.clone()),
-                TreeNode::Matrix(matrix) => Some(join(parent, matrix.number)),
-                TreeNode::QualifiedMatrix(qualified_matrix) => Some(qualified_matrix.path.clone()),
-                TreeNode::Parameter(parameter) => Some(join(parent, parameter.number)),
+                TreeNode::Root => RelativeOid::root(),
+                TreeNode::Node(node) => join(parent, node.number),
+                TreeNode::QualifiedNode(qualified_node) => qualified_node.path.clone(),
+                TreeNode::Matrix(matrix) => join(parent, matrix.number),
+                TreeNode::QualifiedMatrix(qualified_matrix) => qualified_matrix.path.clone(),
+                TreeNode::Parameter(parameter) => join(parent, parameter.number),
                 TreeNode::QualifiedParameter(qualified_parameter) => {
-                    Some(qualified_parameter.path.clone())
+                    qualified_parameter.path.clone()
                 }
-                TreeNode::Template(template) => Some(join(parent, template.number)),
-                TreeNode::QualifiedTemplate(qualified_template) => {
-                    Some(qualified_template.path.clone())
-                }
+                TreeNode::Template(template) => join(parent, template.number),
+                TreeNode::QualifiedTemplate(qualified_template) => qualified_template.path.clone(),
             }
         }
 
         pub fn is_empty(&self) -> bool {
             match self {
-                TreeNode::Empty => false,
+                TreeNode::Root => false,
                 TreeNode::Node(node) => node.is_empty(),
                 TreeNode::QualifiedNode(qualified_node) => qualified_node.is_empty(),
                 TreeNode::Matrix(matrix) => matrix.is_empty(),
@@ -924,7 +913,7 @@ mod ext {
 
         pub fn is_online(&self) -> bool {
             match self {
-                TreeNode::Empty => false,
+                TreeNode::Root => false,
                 TreeNode::Node(node) => node.is_online(),
                 TreeNode::QualifiedNode(qualified_node) => qualified_node.is_online(),
                 TreeNode::Matrix(_) | TreeNode::QualifiedMatrix(_) => true,
@@ -933,6 +922,79 @@ mod ext {
                     qualified_parameter.is_online()
                 }
                 TreeNode::Template(_) | TreeNode::QualifiedTemplate(_) => false,
+            }
+        }
+
+        pub(crate) fn children(self, parent: &RelativeOid) -> Option<(RelativeOid, Vec<TreeNode>)> {
+            match self {
+                TreeNode::Node(Node {
+                    children: Some(children),
+                    number,
+                    contents: _,
+                }) => Some((
+                    join(parent, number),
+                    children.0.into_iter().filter_map(|it| it.into()).collect(),
+                )),
+                TreeNode::QualifiedNode(QualifiedNode {
+                    path,
+                    contents: _,
+                    children: Some(children),
+                }) => Some((
+                    path,
+                    children.0.into_iter().filter_map(|it| it.into()).collect(),
+                )),
+                TreeNode::Matrix(Matrix {
+                    number,
+                    contents: _,
+                    children: Some(children),
+                    targets: _,
+                    sources: _,
+                    connections: _,
+                }) => Some((
+                    join(parent, number),
+                    children.0.into_iter().filter_map(|it| it.into()).collect(),
+                )),
+                TreeNode::QualifiedMatrix(QualifiedMatrix {
+                    path,
+                    contents: _,
+                    children: Some(children),
+                    targets: _,
+                    sources: _,
+                    connections: _,
+                }) => Some((
+                    path,
+                    children.0.into_iter().filter_map(|it| it.into()).collect(),
+                )),
+                TreeNode::Parameter(Parameter {
+                    number,
+                    children: Some(children),
+                    contents: _,
+                }) => Some((
+                    join(parent, number),
+                    children.0.into_iter().filter_map(|it| it.into()).collect(),
+                )),
+                TreeNode::QualifiedParameter(QualifiedParameter {
+                    path,
+                    contents: _,
+                    children: Some(children),
+                }) => Some((
+                    path,
+                    children.0.into_iter().filter_map(|it| it.into()).collect(),
+                )),
+                _ => None,
+            }
+        }
+    }
+
+    impl From<TaggedElement> for Option<TreeNode> {
+        fn from(value: TaggedElement) -> Self {
+            match value.0 {
+                Element::Parameter(parameter) => Some(TreeNode::Parameter(parameter)),
+                Element::Node(node) => Some(TreeNode::Node(node)),
+                Element::Command(_) => None,
+                Element::Matrix(matrix) => Some(TreeNode::Matrix(matrix)),
+                Element::Function(_) => None,
+                Element::Template(template) => Some(TreeNode::Template(template)),
             }
         }
     }
@@ -1097,6 +1159,20 @@ mod ext {
         }
     }
 
+    impl RelativeOid {
+        pub fn parent(&self) -> RelativeOid {
+            if self.0.is_empty() {
+                self.clone()
+            } else {
+                RelativeOid(self.0[..self.0.len() - 1].to_owned())
+            }
+        }
+
+        pub(crate) fn root() -> RelativeOid {
+            RelativeOid(vec![])
+        }
+    }
+
     impl Decode for RelativeOid {
         fn decode_with_tag_and_constraints<D: Decoder>(
             decoder: &mut D,
@@ -1121,6 +1197,20 @@ mod ext {
                 ));
             }
             Ok(RelativeOid(arcs))
+        }
+    }
+
+    impl fmt::Display for RelativeOid {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(
+                f,
+                ".{}",
+                self.0
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<String>>()
+                    .join(".")
+            )
         }
     }
 }

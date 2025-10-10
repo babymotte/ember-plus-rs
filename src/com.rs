@@ -183,7 +183,7 @@ async fn send(
     mut encode_buf: [u8; ENCODE_BUFFER_SIZE],
     mut out_buf: Vec<u8>,
 ) {
-    debug!("Starting receive loop.");
+    debug!("Starting send loop.");
 
     // TODO socket timeouts
     while let Some(frame) = rx.recv().await {

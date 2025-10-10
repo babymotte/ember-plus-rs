@@ -23,17 +23,10 @@ macro_rules! back_to_enum {
     }
 }
 
-pub fn join(parent: Option<&RelativeOid>, number: Integer32) -> RelativeOid {
-    let mut path = as_path(parent).to_vec();
+pub fn join(parent: &RelativeOid, number: Integer32) -> RelativeOid {
+    let mut path = parent.0.clone();
     path.push(number as u32);
     RelativeOid(path)
-}
-
-pub fn as_path(oid: Option<&RelativeOid>) -> &[u32] {
-    match oid {
-        Some(oid) => &oid.0,
-        None => &[],
-    }
 }
 
 pub fn format_bytes(bytes: &[u8]) -> String {

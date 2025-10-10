@@ -45,7 +45,7 @@ impl ClientHandler for EmberClientHandler {
 
 #[tokio::main]
 async fn main() -> EmberResult<()> {
-    tracing_subscriber::fmt().init();
+    logging::init();
 
     let local_addr = "0.0.0.0:9000".parse().expect("malformed socket address");
     let keepalive = None;
@@ -65,4 +65,29 @@ async fn main() -> EmberResult<()> {
     pending::<()>().await;
 
     Ok(())
+}
+
+mod logging {
+    use std::io;
+    use supports_color::Stream;
+    use tracing::level_filters::LevelFilter;
+    use tracing_subscriber::{
+        EnvFilter, Layer, fmt, layer::SubscriberExt, util::SubscriberInitExt,
+    };
+
+    pub(crate) fn init() {
+        tracing_subscriber::registry()
+            .with(
+                fmt::Layer::new()
+                    .with_ansi(supports_color::on(Stream::Stderr).is_some())
+                    .with_writer(io::stderr)
+                    .with_filter(
+                        EnvFilter::builder()
+                            .with_default_directive(LevelFilter::INFO.into())
+                            .with_env_var("EMBER_LOG")
+                            .from_env_lossy(),
+                    ),
+            )
+            .init();
+    }
 }
