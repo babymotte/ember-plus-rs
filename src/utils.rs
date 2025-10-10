@@ -1,9 +1,3 @@
-use std::{
-    alloc::System,
-    path::{Path, PathBuf},
-    time::{Instant, SystemTime},
-};
-
 use crate::glow::{Integer32, RelativeOid};
 
 #[macro_export]
@@ -61,13 +55,4 @@ pub fn format_byte_size(bytes: usize) -> String {
     } else {
         format!("{:.1} {}", size, UNITS[unit])
     }
-}
-
-pub fn dump_file_path() -> PathBuf {
-    let now = SystemTime::now();
-    let timestamp = now
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .expect("clock is broken")
-        .as_millis();
-    PathBuf::from(".").join(format!("{timestamp}.ember"))
 }

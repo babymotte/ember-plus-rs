@@ -17,7 +17,6 @@
 
 use ember_plus_rs::{
     consumer::start_tcp_consumer,
-    error::EmberResult,
     glow::{RelativeOid, TreeNode, Value},
 };
 use miette::Result;

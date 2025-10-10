@@ -11,6 +11,8 @@ default = ["tracing"]
 miette = "7.6.0"
 rasn = "0.27.3"
 serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
+serde_with = "3.15.0"
 thiserror = "2.0.17"
 tokio = { version = "1.47.1", features = [
     "io-util",

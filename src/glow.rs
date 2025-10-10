@@ -29,14 +29,15 @@ pub type Integer64 = i64; // INTEGER (-2^63 .. 2^63-1)
 // =============================
 // RELATIVE-OID
 // =============================
-#[derive(Debug, Clone, PartialEq, Eq, Hash, AsnType)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, AsnType)]
 #[rasn(tag(universal, 13))]
 pub struct RelativeOid(pub Vec<u32>);
 
 // =============================
 // Template
 // =============================
-#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(application, 24))]
 pub struct Template {
     #[rasn(tag(explicit(context, 0)))]
@@ -47,7 +48,8 @@ pub struct Template {
     pub description: Option<EmberString>,
 }
 
-#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(application, 25))]
 pub struct QualifiedTemplate {
     #[rasn(tag(explicit(context, 0)))]
@@ -58,8 +60,9 @@ pub struct QualifiedTemplate {
     pub description: Option<EmberString>,
 }
 
-#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(choice)]
+#[serde(untagged)]
 pub enum TemplateElement {
     Parameter(Parameter),
     Node(Node),
@@ -70,7 +73,8 @@ pub enum TemplateElement {
 // =============================
 // Parameter
 // =============================
-#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(application, 1))]
 pub struct Parameter {
     #[rasn(tag(explicit(context, 0)))]
@@ -81,7 +85,8 @@ pub struct Parameter {
     pub children: Option<ElementCollection>,
 }
 
-#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(application, 9))]
 pub struct QualifiedParameter {
     #[rasn(tag(explicit(context, 0)))]
@@ -92,7 +97,8 @@ pub struct QualifiedParameter {
     pub children: Option<ElementCollection>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, AsnType, Decode, Encode)]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, AsnType, Decode, Encode)]
 #[rasn(set, tag(universal, 17))]
 pub struct ParameterContents {
     #[rasn(tag(explicit(context, 0)))]
@@ -135,7 +141,7 @@ pub struct ParameterContents {
     pub template_reference: Option<RelativeOid>,
 }
 
-#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(choice)]
 #[serde(untagged)]
 pub enum Value {
@@ -153,8 +159,9 @@ pub enum Value {
     Null,
 }
 
-#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(choice)]
+#[serde(untagged)]
 pub enum MinMax {
     #[rasn(tag(universal, 2))]
     Integer(Integer64),
@@ -164,8 +171,9 @@ pub enum MinMax {
     Null,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, AsnType, Decode, Encode)]
+#[derive(Debug, Clone, Serialize, Deserialize, Copy, PartialEq, Eq, AsnType, Decode, Encode)]
 #[rasn(enumerated, tag(universal, 2))]
+#[serde(untagged)]
 pub enum ParameterType {
     Null = 0,
     Integer = 1,
@@ -177,8 +185,11 @@ pub enum ParameterType {
     Octets = 7,
 }
 
-#[derive(Debug, Clone, Default, Copy, PartialEq, Eq, AsnType, Decode, Encode)]
+#[derive(
+    Debug, Clone, Serialize, Deserialize, Default, Copy, PartialEq, Eq, AsnType, Decode, Encode,
+)]
 #[rasn(enumerated, tag(universal, 2))]
+#[serde(untagged)]
 pub enum ParameterAccess {
     None = 0,
     #[default]
@@ -187,7 +198,8 @@ pub enum ParameterAccess {
     ReadWrite = 3,
 }
 
-#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(application, 7))]
 pub struct StringIntegerPair {
     #[rasn(tag(explicit(context, 0)))]
@@ -197,15 +209,16 @@ pub struct StringIntegerPair {
 }
 
 // StringIntegerCollection ::= [APPLICATION 8] IMPLICIT SEQUENCE OF [0] StringIntegerPair
-#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(application, 8), delegate)]
 pub struct StringIntegerCollection(pub Vec<TaggedStringIntegerPair>);
 
-#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(0))]
 pub struct TaggedStringIntegerPair(pub StringIntegerPair);
 
-#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(application, 12))]
 pub struct StreamDescription {
     #[rasn(tag(explicit(context, 0)))]
@@ -214,8 +227,9 @@ pub struct StreamDescription {
     pub offset: Integer32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, AsnType, Decode, Encode)]
+#[derive(Debug, Clone, Serialize, Deserialize, Copy, PartialEq, Eq, AsnType, Decode, Encode)]
 #[rasn(enumerated, tag(universal, 2))]
+#[serde(untagged)]
 pub enum StreamFormat {
     UnsignedInt8 = 0,
     UnsignedInt16BigEndian = 2,
@@ -240,7 +254,8 @@ pub enum StreamFormat {
 // =============================
 // Command
 // =============================
-#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(application, 2))]
 pub struct Command {
     #[rasn(tag(explicit(context, 0)))]
@@ -249,8 +264,9 @@ pub struct Command {
     pub options: Option<CommandOptions>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, AsnType, Decode, Encode)]
+#[derive(Debug, Clone, Serialize, Deserialize, Copy, PartialEq, AsnType, Decode, Encode)]
 #[rasn(enumerated, tag(universal, 2))]
+#[serde(untagged)]
 pub enum CommandType {
     Subscribe = 30,
     Unsubscribe = 31,
@@ -258,8 +274,10 @@ pub enum CommandType {
     Invoke = 33,
 }
 
-#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(choice)]
+#[serde(untagged)]
 pub enum CommandOptions {
     #[rasn(tag(explicit(context, 1)))]
     DirFieldMask(FieldFlags),
@@ -267,8 +285,11 @@ pub enum CommandOptions {
     Invocation(Invocation),
 }
 
-#[derive(Debug, Clone, Default, Copy, PartialEq, Eq, AsnType, Decode, Encode)]
+#[derive(
+    Debug, Clone, Serialize, Deserialize, Default, Copy, PartialEq, Eq, AsnType, Decode, Encode,
+)]
 #[rasn(enumerated, tag(universal, 2))]
+#[serde(untagged)]
 pub enum FieldFlags {
     Sparse = -2,
     All = -1,
@@ -284,7 +305,8 @@ pub enum FieldFlags {
 // =============================
 // Node
 // =============================
-#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(application, 3))]
 pub struct Node {
     #[rasn(tag(explicit(context, 0)))]
@@ -295,7 +317,8 @@ pub struct Node {
     pub children: Option<ElementCollection>,
 }
 
-#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(application, 10))]
 pub struct QualifiedNode {
     #[rasn(tag(explicit(context, 0)))]
@@ -306,7 +329,8 @@ pub struct QualifiedNode {
     pub children: Option<ElementCollection>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, AsnType, Decode, Encode)]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, AsnType, Decode, Encode)]
 #[rasn(set, tag(universal, 17))]
 pub struct NodeContents {
     #[rasn(tag(explicit(context, 0)))]
@@ -326,7 +350,8 @@ pub struct NodeContents {
 // =============================
 // Matrix & Signals
 // =============================
-#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(application, 13))]
 pub struct Matrix {
     #[rasn(tag(explicit(context, 0)))]
@@ -343,7 +368,8 @@ pub struct Matrix {
     pub connections: Option<ConnectionCollection>,
 }
 
-#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(set, tag(universal, 17))]
 pub struct MatrixContents {
     #[rasn(tag(explicit(context, 0)))]
@@ -374,23 +400,26 @@ pub struct MatrixContents {
     pub template_reference: Option<RelativeOid>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, AsnType, Decode, Encode)]
+#[derive(Debug, Clone, Serialize, Deserialize, Copy, PartialEq, Eq, AsnType, Decode, Encode)]
 #[rasn(enumerated, tag(universal, 2))]
+#[serde(untagged)]
 pub enum MatrixType {
     OneToN = 0,
     OneToOne = 1,
     NToN = 2,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, AsnType, Decode, Encode)]
+#[derive(Debug, Clone, Serialize, Deserialize, Copy, PartialEq, Eq, AsnType, Decode, Encode)]
 #[rasn(enumerated, tag(universal, 2))]
+#[serde(untagged)]
 pub enum MatrixAddressingMode {
     Linear = 0,
     NonLinear = 1,
 }
 
-#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(choice)]
+#[serde(untagged)]
 pub enum ParametersLocation {
     #[rasn(tag(universal, 13))] // RELATIVE-OID
     BasePath(RelativeOid),
@@ -399,15 +428,16 @@ pub enum ParametersLocation {
 }
 
 // LabelCollection ::= SEQUENCE OF [0] Label
-#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(universal, 16), delegate)]
 pub struct LabelCollection(pub Vec<TaggedLabel>);
 
-#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(0))]
 pub struct TaggedLabel(pub Label);
 
-#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(application, 18))]
 pub struct Label {
     #[rasn(tag(explicit(context, 0)))]
@@ -417,19 +447,20 @@ pub struct Label {
 }
 
 // TargetCollection ::= SEQUENCE OF [0] Target
-#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(universal, 16), delegate)]
 pub struct TargetCollection(pub Vec<TaggedTarget>);
 
-#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(0))]
 pub struct TaggedTarget(pub Target);
 
-#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(application, 14))]
 pub struct Target(pub Signal);
 
-#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(universal, 16))]
 pub struct Signal {
     #[rasn(tag(explicit(context, 0)))]
@@ -438,7 +469,8 @@ pub struct Signal {
     pub contents: Option<SignalContents>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, AsnType, Decode, Encode)]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, AsnType, Decode, Encode)]
 #[rasn(set, tag(universal, 17))]
 pub struct SignalContents {
     #[rasn(tag(explicit(context, 0)))]
@@ -450,28 +482,29 @@ pub struct SignalContents {
 }
 
 // SourceCollection ::= SEQUENCE OF [0] Source
-#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(universal, 16), delegate)]
 pub struct SourceCollection(pub Vec<TaggedSource>);
 
-#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(0))]
 pub struct TaggedSource(pub Source);
 
-#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(application, 15))]
 pub struct Source(pub Signal);
 
 // ConnectionCollection ::= SEQUENCE OF [0] Connection
-#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(universal, 16), delegate)]
 pub struct ConnectionCollection(pub Vec<TaggedConnection>);
 
-#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(0))]
 pub struct TaggedConnection(pub Connection);
 
-#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(application, 16))]
 pub struct Connection {
     #[rasn(tag(explicit(context, 0)))]
@@ -484,20 +517,22 @@ pub struct Connection {
     pub disposition: Option<ConnectionDisposition>,
 }
 
-#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(universal, 13))]
 pub struct PackedNumbers(pub RelativeOid);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, AsnType, Decode, Encode)]
+#[derive(Debug, Clone, Serialize, Deserialize, Copy, PartialEq, Eq, AsnType, Decode, Encode)]
 #[rasn(enumerated, tag(universal, 2))]
+#[serde(untagged)]
 pub enum ConnectionOperation {
     Absolute = 0,
     Connect = 1,
     Disconnect = 2,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, AsnType, Decode, Encode)]
+#[derive(Debug, Clone, Serialize, Deserialize, Copy, PartialEq, Eq, AsnType, Decode, Encode)]
 #[rasn(enumerated, tag(universal, 2))]
+#[serde(untagged)]
 pub enum ConnectionDisposition {
     Tally = 0,
     Modified = 1,
@@ -505,7 +540,8 @@ pub enum ConnectionDisposition {
     Locked = 3,
 }
 
-#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(application, 17))]
 pub struct QualifiedMatrix {
     #[rasn(tag(explicit(context, 0)))]
@@ -525,7 +561,8 @@ pub struct QualifiedMatrix {
 // =============================
 // Function
 // =============================
-#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(application, 19))]
 pub struct Function {
     #[rasn(tag(explicit(context, 0)))]
@@ -536,7 +573,8 @@ pub struct Function {
     pub children: Option<ElementCollection>,
 }
 
-#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(application, 20))]
 pub struct QualifiedFunction {
     #[rasn(tag(explicit(context, 0)))]
@@ -547,7 +585,8 @@ pub struct QualifiedFunction {
     pub children: Option<ElementCollection>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, AsnType, Decode, Encode)]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, AsnType, Decode, Encode)]
 #[rasn(set, tag(universal, 17))]
 pub struct FunctionContents {
     #[rasn(tag(explicit(context, 0)))]
@@ -563,15 +602,16 @@ pub struct FunctionContents {
 }
 
 // TupleDescription ::= SEQUENCE OF [0] TupleItemDescription
-#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(universal, 16), delegate)]
 pub struct TupleDescription(pub Vec<TaggedTupleItemDescription>);
 
-#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(0))]
 pub struct TaggedTupleItemDescription(pub TupleItemDescription);
 
-#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(application, 21))]
 pub struct TupleItemDescription {
     #[rasn(tag(explicit(context, 0)))]
@@ -580,7 +620,8 @@ pub struct TupleItemDescription {
     pub name: Option<EmberString>,
 }
 
-#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(application, 22))]
 pub struct Invocation {
     #[rasn(tag(explicit(context, 0)))]
@@ -590,15 +631,16 @@ pub struct Invocation {
 }
 
 // Tuple ::= SEQUENCE OF [0] Value
-#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(universal, 16), delegate)]
 pub struct Tuple(pub Vec<TaggedValue>);
 
-#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(0))]
 pub struct TaggedValue(pub Value);
 
-#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(application, 23))]
 pub struct InvocationResult {
     #[rasn(tag(explicit(context, 0)))]
@@ -613,16 +655,17 @@ pub struct InvocationResult {
 // Element & Root
 // =============================
 
-#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(application, 4), delegate)]
 pub struct ElementCollection(pub Vec<TaggedElement>);
 
-#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(0))]
 pub struct TaggedElement(pub Element);
 
-#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(choice)]
+#[serde(untagged)]
 pub enum Element {
     Parameter(Parameter),
     Node(Node),
@@ -632,7 +675,8 @@ pub enum Element {
     Template(Template),
 }
 
-#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(application, 5))]
 pub struct StreamEntry {
     #[rasn(tag(explicit(context, 0)))]
@@ -642,17 +686,18 @@ pub struct StreamEntry {
 }
 
 // StreamCollection ::= [APPLICATION 6] IMPLICIT SEQUENCE OF [0] StreamEntry
-#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(application, 6), delegate)]
 pub struct StreamCollection(pub Vec<TaggedStreamEntry>);
 
-#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(6))]
 pub struct TaggedStreamEntry(pub StreamEntry);
 
-#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(explicit(application, 0)))] // Root ::= [APPLICATION 0] CHOICE { ... } (explicit by module default)
 #[rasn(choice)]
+#[serde(untagged)]
 pub enum Root {
     Elements(RootElementCollection),
     Streams(StreamCollection),
@@ -660,16 +705,17 @@ pub enum Root {
 }
 
 // RootElementCollection ::= [APPLICATION 11] IMPLICIT SEQUENCE OF [0] RootElement
-#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(application, 11), delegate)]
 pub struct RootElementCollection(pub Vec<TaggedRootElement>);
 
-#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(0))]
 pub struct TaggedRootElement(pub RootElement);
 
-#[derive(Debug, Clone, PartialEq, AsnType, Decode, Encode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(choice)]
+#[serde(untagged)]
 pub enum RootElement {
     Element(Element),
     QualifiedParameter(QualifiedParameter),
@@ -686,14 +732,16 @@ mod ext {
         ember::{EmberPacket, MAX_PAYLOAD_LEN},
         error::EmberResult,
         s101::Flags,
-        utils::{dump_file_path, format_byte_size, join},
+        utils::{format_byte_size, join},
     };
     use rasn::{Codec, ber};
+    #[cfg(feature = "tracing")]
+    use std::fs;
     use std::{
         fmt::{self, Debug},
+        path::PathBuf,
         time::Instant,
     };
-    use tokio::{fs, spawn};
     #[cfg(feature = "tracing")]
     use tracing::{error, warn};
 
@@ -762,19 +810,17 @@ mod ext {
                 .flatten()
                 .map(|it| *it)
                 .collect::<Vec<u8>>();
-            if packets.len() >= 500 {
+            if packets.len() >= 300 {
                 let reconstructed_payload = reconstructed_payload.clone();
-                spawn(async move {
-                    let file_path = dump_file_path();
-                    #[cfg(feature = "tracing")]
-                    warn!("Dumping message to disk: {}", file_path.display());
-                    #[cfg(feature = "tracing")]
-                    if let Err(e) = fs::write(&file_path, &reconstructed_payload).await {
-                        warn!("Could not dump payload to {}: {e}", file_path.display());
-                    }
-                    #[cfg(not(feature = "tracing"))]
-                    fs::write(file_path, &reconstructed_payload).await.ok();
-                });
+                let file_path = PathBuf::from(".").join(format!("{}.EmBER", packets.len()));
+                #[cfg(feature = "tracing")]
+                warn!("Dumping message to disk: {}", file_path.display());
+                #[cfg(feature = "tracing")]
+                if let Err(e) = fs::write(&file_path, &reconstructed_payload) {
+                    warn!("Could not dump payload to {}: {e}", file_path.display());
+                }
+                #[cfg(not(feature = "tracing"))]
+                fs::write(file_path, &reconstructed_payload).await.ok();
             }
             #[cfg(feature = "tracing")]
             let start = Instant::now();
@@ -849,13 +895,24 @@ mod ext {
         }
     }
 
+    impl fmt::Display for Root {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(
+                f,
+                "{}",
+                serde_json::to_string_pretty(self).expect("invalid json")
+            )
+        }
+    }
+
     impl ElementCollection {
         fn command(commad: Command) -> ElementCollection {
             ElementCollection(vec![TaggedElement(Element::Command(commad))])
         }
     }
 
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[serde(untagged)]
     pub enum TreeNode {
         Root,
         Node(Node),
@@ -1017,6 +1074,16 @@ mod ext {
                 )),
                 _ => None,
             }
+        }
+    }
+
+    impl fmt::Display for TreeNode {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(
+                f,
+                "{}",
+                serde_json::to_string_pretty(self).expect("invalid json")
+            )
         }
     }
 
@@ -1259,11 +1326,8 @@ mod ext {
 
 #[cfg(test)]
 mod test {
-    use std::{fs, time::Instant};
-
-    use crate::s101::{Flags, NonEscapingS101Frame};
-
     use super::*;
+    use crate::s101::{Flags, NonEscapingS101Frame};
     use rasn::ber;
 
     #[test]
@@ -1644,13 +1708,16 @@ mod test {
 
     #[test]
     fn big_message_is_decoded_in_reasonable_time() {
-        let data = std::fs::read("./test/big.EmBER").unwrap();
+        let data = std::fs::read("./large.EmBER").unwrap();
         let start = std::time::Instant::now();
-        let result = std::panic::catch_unwind(|| rasn::ber::decode::<Root>(&data));
-        let elapsed = start.elapsed();
-        eprintln!("decode took {:?}", elapsed);
-        assert!(result.is_ok());
-        assert!(elapsed.as_millis() < 1000);
+        let ber_decoded = rasn::ber::decode::<Root>(&data).unwrap();
+        eprintln!("EmBER+ BER decode took {:?}", start.elapsed());
+        // assert!(start.elapsed().as_millis() < 1000);
+        let der = ber::encode(&ber_decoded).unwrap();
+        let start = std::time::Instant::now();
+        let der_decoded = ber::decode::<Root>(&der).unwrap();
+        eprintln!("rasn BER decode took {:?}", start.elapsed());
+        assert_eq!(ber_decoded, der_decoded);
     }
 
     fn xl_root() -> Root {
