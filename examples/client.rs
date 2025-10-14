@@ -15,19 +15,19 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use std::time::Instant;
-
 use ember_plus_rs::{
     consumer::{TreeEvent, start_tcp_consumer},
-    glow::{RelativeOid, TreeNode, Value},
+    glow::{RelativeOid, TreeNode},
 };
 use miette::Result;
+use serde_json::json;
+use std::time::Instant;
 use tokio::select;
 use tokio_util::sync::CancellationToken;
 use tracing::debug;
 #[cfg(feature = "tracing")]
 use tracing::info;
-use worterbuch_client::Worterbuch;
+use worterbuch_client::{Value, Worterbuch, topic};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -84,14 +84,24 @@ async fn process_tree_element(parent: RelativeOid, node: TreeNode, wb: &Worterbu
     debug!("Got update for content of node {parent}: {node}");
 
     match node {
+        TreeNode::Node(node) => {
+            if let Some(contents) = node.contents {
+                publish(key(oid), json!(contents), wb).await?;
+            }
+        }
+        TreeNode::QualifiedNode(node) => {
+            if let Some(contents) = node.contents {
+                publish(key(oid), json!(contents), wb).await?;
+            }
+        }
         TreeNode::Parameter(param) => {
-            if let Some(value) = param.value() {
-                publish(oid, value, wb).await?;
+            if let Some(contents) = param.contents {
+                publish(key(oid), json!(contents), wb).await?;
             }
         }
         TreeNode::QualifiedParameter(param) => {
-            if let Some(value) = param.value() {
-                publish(oid, value, wb).await?;
+            if let Some(contents) = param.contents {
+                publish(key(oid), json!(contents), wb).await?;
             }
         }
         _ => {}
@@ -100,14 +110,21 @@ async fn process_tree_element(parent: RelativeOid, node: TreeNode, wb: &Worterbu
     Ok(())
 }
 
-async fn publish(oid: RelativeOid, value: Value, wb: &Worterbuch) -> Result<()> {
-    let key = key(oid);
-    wb.set(key, value).await?;
+async fn publish(key: String, value: Value, wb: &Worterbuch) -> Result<()> {
+    match value {
+        Value::Object(map) => {
+            for (k, v) in map {
+                Box::pin(publish(topic!(key, k), v, wb)).await?;
+            }
+        }
+        val => wb.set(key, val).await?,
+    }
+
     Ok(())
 }
 
 fn key(oid: RelativeOid) -> String {
-    format!("ember{}", oid.to_string().replace(".", "/"))
+    format!("ember{}", oid.to_string().replace(".", "/children/"))
 }
 
 #[cfg(feature = "tracing")]

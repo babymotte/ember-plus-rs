@@ -105,6 +105,7 @@ pub struct ParameterContents {
     #[rasn(tag(explicit(context, 1)))]
     pub description: Option<EmberString>,
     #[rasn(tag(explicit(context, 2)))]
+    #[serde(rename = "value")]
     pub param_value: Option<Value>,
     #[rasn(tag(explicit(context, 3)))]
     pub minimum: Option<MinMax>,
@@ -142,6 +143,7 @@ pub struct ParameterContents {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(choice)]
+#[serde(untagged)]
 pub enum Value {
     #[rasn(tag(universal, 2))] // INTEGER
     Integer(Integer64),
