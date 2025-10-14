@@ -1043,6 +1043,17 @@ mod ext {
                 _ => None,
             }
         }
+
+        pub(crate) fn may_have_children(&self) -> bool {
+            match self {
+                TreeNode::Root | TreeNode::Node(_) | TreeNode::QualifiedNode(_) => true,
+                TreeNode::Parameter(_) | TreeNode::QualifiedParameter(_) => false,
+                TreeNode::Matrix(_)
+                | TreeNode::QualifiedMatrix(_)
+                | TreeNode::Template(_)
+                | TreeNode::QualifiedTemplate(_) => todo!(),
+            }
+        }
     }
 
     impl fmt::Display for TreeNode {

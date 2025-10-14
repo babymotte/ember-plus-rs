@@ -20,17 +20,13 @@ use crate::{
     error::EmberResult,
     glow::{Element, RelativeOid, Root, RootElement, TaggedRootElement, TreeNode},
 };
-use std::{
-    collections::{HashMap, HashSet},
-    net::SocketAddr,
-    time::Duration,
-};
+use std::{collections::HashSet, net::SocketAddr, time::Duration};
 use tokio::{net::TcpStream, select, spawn, sync::mpsc};
 use tokio_util::sync::CancellationToken;
 #[cfg(feature = "tracing")]
 use tracing::{debug, error, trace, warn};
 
-pub type NodeCallback = mpsc::Sender<(RelativeOid, TreeNode)>;
+pub type NodeCallback = mpsc::Sender<TreeEvent>;
 
 pub enum EmberConsumerApiMessage {
     FetchRecursive(RelativeOid, TreeNode, NodeCallback),
@@ -41,8 +37,13 @@ pub struct EmberConsumerApi {
     tx: mpsc::Sender<EmberConsumerApiMessage>,
 }
 
+pub enum TreeEvent {
+    Element((RelativeOid, TreeNode)),
+    FullTreeReceived,
+}
+
 impl EmberConsumerApi {
-    pub async fn fetch_full_tree(&self) -> mpsc::Receiver<(RelativeOid, TreeNode)> {
+    pub async fn fetch_full_tree(&self) -> mpsc::Receiver<TreeEvent> {
         let (tx, rx) = mpsc::channel(1024);
         self.fetch_recursive(RelativeOid::root(), TreeNode::Root, tx)
             .await;
@@ -67,10 +68,10 @@ impl EmberConsumerApi {
 pub struct EmberConsumer {
     ember_sender: mpsc::Sender<Root>,
     ember_receiver: mpsc::Receiver<Root>,
-    permanent_callbacks: HashMap<RelativeOid, NodeCallback>,
+    permanent_callbacks: Vec<NodeCallback>,
     shutdown_token: CancellationToken,
-    api: EmberConsumerApi,
-    requested_directories: HashSet<RelativeOid>,
+    in_flight: HashSet<RelativeOid>,
+    explored: HashSet<RelativeOid>,
 }
 
 impl EmberConsumer {
@@ -85,10 +86,10 @@ impl EmberConsumer {
         let consumer = Self {
             ember_sender,
             ember_receiver,
-            permanent_callbacks: HashMap::new(),
+            permanent_callbacks: Vec::new(),
             shutdown_token,
-            api: api.clone(),
-            requested_directories: HashSet::new(),
+            in_flight: HashSet::new(),
+            explored: HashSet::new(),
         };
 
         spawn(async move {
@@ -124,7 +125,8 @@ impl EmberConsumer {
     async fn process_api_message(&mut self, msg: EmberConsumerApiMessage) -> EmberResult<()> {
         match msg {
             EmberConsumerApiMessage::FetchRecursive(parent, node, consumer) => {
-                self.fetch_recursive(parent, node, consumer).await;
+                self.permanent_callbacks.push(consumer);
+                self.fetch_recursive(parent, node).await;
             }
         }
         Ok(())
@@ -292,51 +294,61 @@ impl EmberConsumer {
                     return Ok(true);
                 }
             }
-            Ok(false)
         }
         // this applies to leaf nodes in a tree structure or to qualified nodes
         else {
             #[cfg(feature = "tracing")]
             debug!("Looking up callbacks for node {oid} …");
 
-            if let Some(callback) = self.permanent_callbacks.get(&parent).cloned() {
-                #[cfg(feature = "tracing")]
-                debug!("Found callback for node {oid}");
-
-                if self.requested_directories.insert(oid.clone()) {
+            if node.may_have_children() {
+                if self.explored.insert(oid.clone()) {
                     let p = parent.clone();
                     let n = node.clone();
-                    let c = callback.clone();
-                    self.fetch_recursive(p, n, c).await;
+                    self.fetch_recursive(p, n).await;
                 } else {
                     #[cfg(feature = "tracing")]
                     debug!("Content of node {oid} already requested.");
                 }
+            }
 
-                if callback.send((parent, node)).await.is_err() {
+            for callback in &self.permanent_callbacks {
+                if callback
+                    .send(TreeEvent::Element((parent.clone(), node.clone())))
+                    .await
+                    .is_err()
+                {
                     return Ok(true);
                 }
             }
-
-            Ok(false)
         }
+
+        if self.in_flight.remove(&parent) {
+            #[cfg(feature = "tracing")]
+            debug!("In flight GET_DIRECTORY commands: {}", self.in_flight.len());
+
+            if self.in_flight.is_empty() {
+                for callback in &self.permanent_callbacks {
+                    if callback.send(TreeEvent::FullTreeReceived).await.is_err() {
+                        return Ok(true);
+                    }
+                }
+            }
+        }
+
+        Ok(false)
     }
 
-    async fn fetch_recursive(
-        &mut self,
-        parent: RelativeOid,
-        node: TreeNode,
-        consumer: NodeCallback,
-    ) {
+    async fn fetch_recursive(&mut self, parent: RelativeOid, node: TreeNode) {
         let Some((oid, request)) = node.clone().get_directory(&parent) else {
             return;
         };
 
-        self.permanent_callbacks
-            .insert(oid.clone(), consumer.clone());
-
         #[cfg(feature = "tracing")]
         debug!("Fetching content of node {oid}: {node} using request: {request}");
+
+        self.in_flight.insert(oid.clone());
+        #[cfg(feature = "tracing")]
+        debug!("In flight GET_DIRECTORY commands: {}", self.in_flight.len());
 
         self.ember_sender.send(request).await.ok();
     }

@@ -15,13 +15,16 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+use std::time::Instant;
+
 use ember_plus_rs::{
-    consumer::start_tcp_consumer,
+    consumer::{TreeEvent, start_tcp_consumer},
     glow::{RelativeOid, TreeNode, Value},
 };
 use miette::Result;
 use tokio::select;
 use tokio_util::sync::CancellationToken;
+use tracing::debug;
 #[cfg(feature = "tracing")]
 use tracing::info;
 use worterbuch_client::Worterbuch;
@@ -37,9 +40,7 @@ async fn main() -> Result<()> {
     let shutdown_token = CancellationToken::new();
 
     let consumer = start_tcp_consumer(
-        "10.230.31.159:9000"
-            .parse()
-            .expect("malformed socket address"),
+        "127.0.0.1:9000".parse().expect("malformed socket address"),
         // Some(Duration::from_secs(1)),
         None,
         false,
@@ -47,11 +48,13 @@ async fn main() -> Result<()> {
     )
     .await?;
 
+    let start = Instant::now();
+
     let mut rx = consumer.fetch_full_tree().await;
 
     loop {
         select! {
-            Some((parent, node)) = rx.recv() => process_event(parent, node, &wb).await?,
+            Some(ev) = rx.recv() => process_event(ev, &wb, start).await?,
             _ = shutdown_token.cancelled() => break,
             else => break,
         }
@@ -63,11 +66,22 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn process_event(parent: RelativeOid, node: TreeNode, wb: &Worterbuch) -> Result<()> {
+async fn process_event(event: TreeEvent, wb: &Worterbuch, start: Instant) -> Result<()> {
+    match event {
+        TreeEvent::Element((parent, node)) => process_tree_element(parent, node, wb).await?,
+        TreeEvent::FullTreeReceived => {
+            info!("Full tree received after {:?}", start.elapsed());
+        }
+    }
+
+    Ok(())
+}
+
+async fn process_tree_element(parent: RelativeOid, node: TreeNode, wb: &Worterbuch) -> Result<()> {
     let oid = node.oid(&parent);
 
     #[cfg(feature = "tracing")]
-    info!("Got update for content of node {parent}: {node}");
+    debug!("Got update for content of node {parent}: {node}");
 
     match node {
         TreeNode::Parameter(param) => {
