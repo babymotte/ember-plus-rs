@@ -195,7 +195,7 @@ async fn send(
     // TODO socket timeouts
     while let Some(frame) = rx.recv().await {
         #[cfg(feature = "tracing")]
-        trace!("Sending frame {frame:?} …");
+        trace!("Sending frame {frame} …");
         let send_buf = frame.encode(&mut encode_buf, &mut out_buf);
         if let Err(e) = sock.write_all(send_buf).await {
             #[cfg(feature = "tracing")]
@@ -225,14 +225,14 @@ async fn receive(
         match S101Frame::decode(&mut sock, &mut buf).await {
             Ok(Some(frame)) => {
                 #[cfg(feature = "tracing")]
-                trace!("Received frame: {frame:?}");
+                trace!("Received frame: {frame}");
                 if frame.is_keepalive_request() {
                     if keepalive_tx.send(()).await.is_err() {
                         break;
                     }
                 } else if frame.is_keepalive_response() {
                     #[cfg(feature = "tracing")]
-                    trace!("Received keepalive response: {frame:?}");
+                    trace!("Received keepalive response: {frame}");
                     // TODO check for missing keepalive responses
                 } else if tx.send(frame).await.is_err() {
                     break;

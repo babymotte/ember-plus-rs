@@ -167,11 +167,7 @@ impl S101Frame {
 
 impl fmt::Display for S101Frame {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}",
-            serde_json::to_string_pretty(self).expect("invalid json")
-        )
+        write!(f, "{}", serde_json::to_string(self).expect("invalid json"))
     }
 }
 
