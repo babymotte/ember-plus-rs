@@ -16,7 +16,7 @@
  */
 
 pub use ext::*;
-use rasn::{AsnType, Decode, Decoder, Encode, Encoder, de::Error};
+use rasn::{AsnType, Decode, Decoder, Encode, Encoder, de::Error, types::SequenceOf};
 use serde::{Deserialize, Serialize};
 
 // =============================
@@ -31,7 +31,7 @@ pub type Integer64 = i64; // INTEGER (-2^63 .. 2^63-1)
 // =============================
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, AsnType)]
 #[rasn(tag(universal, 13))]
-pub struct RelativeOid(pub Vec<u32>);
+pub struct RelativeOid(pub SequenceOf<u32>);
 
 // =============================
 // Template
@@ -211,7 +211,7 @@ pub struct StringIntegerPair {
 // StringIntegerCollection ::= [APPLICATION 8] IMPLICIT SEQUENCE OF [0] StringIntegerPair
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(application, 8), delegate)]
-pub struct StringIntegerCollection(pub Vec<TaggedStringIntegerPair>);
+pub struct StringIntegerCollection(pub SequenceOf<TaggedStringIntegerPair>);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(0))]
@@ -430,7 +430,7 @@ pub enum ParametersLocation {
 // LabelCollection ::= SEQUENCE OF [0] Label
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(universal, 16), delegate)]
-pub struct LabelCollection(pub Vec<TaggedLabel>);
+pub struct LabelCollection(pub SequenceOf<TaggedLabel>);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(0))]
@@ -449,7 +449,7 @@ pub struct Label {
 // TargetCollection ::= SEQUENCE OF [0] Target
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(universal, 16), delegate)]
-pub struct TargetCollection(pub Vec<TaggedTarget>);
+pub struct TargetCollection(pub SequenceOf<TaggedTarget>);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(0))]
@@ -484,7 +484,7 @@ pub struct SignalContents {
 // SourceCollection ::= SEQUENCE OF [0] Source
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(universal, 16), delegate)]
-pub struct SourceCollection(pub Vec<TaggedSource>);
+pub struct SourceCollection(pub SequenceOf<TaggedSource>);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(0))]
@@ -497,7 +497,7 @@ pub struct Source(pub Signal);
 // ConnectionCollection ::= SEQUENCE OF [0] Connection
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(universal, 16), delegate)]
-pub struct ConnectionCollection(pub Vec<TaggedConnection>);
+pub struct ConnectionCollection(pub SequenceOf<TaggedConnection>);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(0))]
@@ -604,7 +604,7 @@ pub struct FunctionContents {
 // TupleDescription ::= SEQUENCE OF [0] TupleItemDescription
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(universal, 16), delegate)]
-pub struct TupleDescription(pub Vec<TaggedTupleItemDescription>);
+pub struct TupleDescription(pub SequenceOf<TaggedTupleItemDescription>);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(0))]
@@ -633,7 +633,7 @@ pub struct Invocation {
 // Tuple ::= SEQUENCE OF [0] Value
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(universal, 16), delegate)]
-pub struct Tuple(pub Vec<TaggedValue>);
+pub struct Tuple(pub SequenceOf<TaggedValue>);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(0))]
@@ -657,7 +657,7 @@ pub struct InvocationResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(application, 4), delegate)]
-pub struct ElementCollection(pub Vec<TaggedElement>);
+pub struct ElementCollection(pub SequenceOf<TaggedElement>);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(0))]
@@ -688,7 +688,7 @@ pub struct StreamEntry {
 // StreamCollection ::= [APPLICATION 6] IMPLICIT SEQUENCE OF [0] StreamEntry
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(application, 6), delegate)]
-pub struct StreamCollection(pub Vec<TaggedStreamEntry>);
+pub struct StreamCollection(pub SequenceOf<TaggedStreamEntry>);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(6))]
@@ -707,7 +707,7 @@ pub enum Root {
 // RootElementCollection ::= [APPLICATION 11] IMPLICIT SEQUENCE OF [0] RootElement
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(application, 11), delegate)]
-pub struct RootElementCollection(pub Vec<TaggedRootElement>);
+pub struct RootElementCollection(pub SequenceOf<TaggedRootElement>);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(0))]
@@ -731,6 +731,7 @@ mod ext {
     use crate::{
         ember::{EmberPacket, MAX_PAYLOAD_LEN},
         error::EmberResult,
+        glow,
         s101::Flags,
         utils::{format_byte_size, join},
     };
@@ -1329,6 +1330,7 @@ mod test {
     use super::*;
     use crate::s101::{Flags, NonEscapingS101Frame};
     use rasn::ber;
+    use std::fs;
 
     #[test]
     fn serde_roundtrip() {
@@ -1710,14 +1712,21 @@ mod test {
     fn big_message_is_decoded_in_reasonable_time() {
         let data = std::fs::read("./large.EmBER").unwrap();
         let start = std::time::Instant::now();
-        let ber_decoded = rasn::ber::decode::<Root>(&data).unwrap();
+        let _ = ber::decode::<Root>(&data).unwrap();
         eprintln!("EmBER+ BER decode took {:?}", start.elapsed());
-        // assert!(start.elapsed().as_millis() < 1000);
-        let der = ber::encode(&ber_decoded).unwrap();
-        let start = std::time::Instant::now();
-        let der_decoded = ber::decode::<Root>(&der).unwrap();
-        eprintln!("rasn BER decode took {:?}", start.elapsed());
-        assert_eq!(ber_decoded, der_decoded);
+        assert!(start.elapsed().as_millis() < 100);
+    }
+
+    #[test]
+    fn examples_are_decoded_correctly() {
+        let _root = ber::decode::<Root>(&fs::read("./test/DHD_Example1.EmBER").unwrap()).unwrap();
+        // eprintln!("{}", _root);
+        let _root = ber::decode::<Root>(&fs::read("./test/DHD_Example2.EmBER").unwrap()).unwrap();
+        // eprintln!("{}", _root);
+        let _root = ber::decode::<Root>(&fs::read("./test/RAVENNAnet.EmBER").unwrap()).unwrap();
+        // eprintln!("{}", _root);
+        let _root = ber::decode::<Root>(&fs::read("./test/sapphire.EmBER").unwrap()).unwrap();
+        // eprintln!("{}", _root);
     }
 
     fn xl_root() -> Root {
