@@ -71,6 +71,7 @@ pub struct EmberConsumer {
     recursive_fetch_callbacks: HashMap<RelativeOid, NodeCallback>,
     shutdown_token: CancellationToken,
     api: EmberConsumerApi,
+    requested_directories: HashSet<RelativeOid>,
 }
 
 impl EmberConsumer {
@@ -89,6 +90,7 @@ impl EmberConsumer {
             recursive_fetch_callbacks: HashMap::new(),
             shutdown_token,
             api: api.clone(),
+            requested_directories: HashSet::new(),
         };
 
         spawn(async move {
@@ -138,24 +140,19 @@ impl EmberConsumer {
 
         match msg {
             Root::Elements(root_element_collection) => {
-                let mut used_recursive_fetch_callbacks = HashSet::new();
                 for e in root_element_collection.0 {
                     match e {
                         TaggedRootElement(RootElement::Element(element)) => match element {
                             Element::Parameter(parameter) => {
                                 cancel |= self
-                                    .process_unqualified_root_element(
-                                        TreeNode::Parameter(parameter),
-                                        &mut used_recursive_fetch_callbacks,
-                                    )
+                                    .process_unqualified_root_element(TreeNode::Parameter(
+                                        parameter,
+                                    ))
                                     .await?;
                             }
                             Element::Node(node) => {
                                 cancel |= self
-                                    .process_unqualified_root_element(
-                                        TreeNode::Node(node),
-                                        &mut used_recursive_fetch_callbacks,
-                                    )
+                                    .process_unqualified_root_element(TreeNode::Node(node))
                                     .await?;
                             }
                             Element::Command(command) => {
@@ -165,10 +162,7 @@ impl EmberConsumer {
                             }
                             Element::Matrix(matrix) => {
                                 cancel |= self
-                                    .process_unqualified_root_element(
-                                        TreeNode::Matrix(matrix),
-                                        &mut used_recursive_fetch_callbacks,
-                                    )
+                                    .process_unqualified_root_element(TreeNode::Matrix(matrix))
                                     .await?;
                             }
                             Element::Function(function) => {
@@ -178,10 +172,7 @@ impl EmberConsumer {
                             }
                             Element::Template(template) => {
                                 cancel |= self
-                                    .process_unqualified_root_element(
-                                        TreeNode::Template(template),
-                                        &mut used_recursive_fetch_callbacks,
-                                    )
+                                    .process_unqualified_root_element(TreeNode::Template(template))
                                     .await?;
                             }
                         },
@@ -191,7 +182,6 @@ impl EmberConsumer {
                                 .process_qualified_root_element(
                                     qulified_path,
                                     TreeNode::QualifiedParameter(qualified_parameter),
-                                    &mut used_recursive_fetch_callbacks,
                                 )
                                 .await?;
                         }
@@ -201,7 +191,6 @@ impl EmberConsumer {
                                 .process_qualified_root_element(
                                     qulified_path,
                                     TreeNode::QualifiedNode(qualified_node),
-                                    &mut used_recursive_fetch_callbacks,
                                 )
                                 .await?;
                         }
@@ -211,7 +200,6 @@ impl EmberConsumer {
                                 .process_qualified_root_element(
                                     qulified_path,
                                     TreeNode::QualifiedMatrix(qualified_matrix),
-                                    &mut used_recursive_fetch_callbacks,
                                 )
                                 .await?;
                         }
@@ -228,17 +216,9 @@ impl EmberConsumer {
                                 .process_qualified_root_element(
                                     qulified_path,
                                     TreeNode::QualifiedTemplate(qualified_template),
-                                    &mut used_recursive_fetch_callbacks,
                                 )
                                 .await?;
                         }
-                    }
-                }
-                for oid in used_recursive_fetch_callbacks {
-                    let _removed = self.recursive_fetch_callbacks.remove(&oid);
-                    #[cfg(feature = "tracing")]
-                    if _removed.is_some() {
-                        debug!("Removed recursive fetch callback for {oid}");
                     }
                 }
             }
@@ -253,31 +233,22 @@ impl EmberConsumer {
         &mut self,
         qualified_path: RelativeOid,
         node: TreeNode,
-        used_recursive_fetch_callbacks: &mut HashSet<RelativeOid>,
     ) -> EmberResult<bool> {
         let parent = qualified_path.parent();
-        self.process_root_element(parent, node, used_recursive_fetch_callbacks)
-            .await
+        self.process_root_element(parent, node).await
     }
 
-    async fn process_unqualified_root_element(
-        &mut self,
-        node: TreeNode,
-        used_recursive_fetch_callbacks: &mut HashSet<RelativeOid>,
-    ) -> EmberResult<bool> {
+    async fn process_unqualified_root_element(&mut self, node: TreeNode) -> EmberResult<bool> {
         let parent = RelativeOid::root();
-        self.process_root_element(parent, node, used_recursive_fetch_callbacks)
-            .await
+        self.process_root_element(parent, node).await
     }
 
     async fn process_root_element(
         &mut self,
         parent: RelativeOid,
         node: TreeNode,
-        used_recursive_fetch_callbacks: &mut HashSet<RelativeOid>,
     ) -> EmberResult<bool> {
         let recursive_fetch_callback = self.recursive_fetch_callbacks.get(&parent).cloned();
-        used_recursive_fetch_callbacks.insert(parent.clone());
         self.process_ember_node(parent, node, recursive_fetch_callback.as_ref())
             .await
     }
@@ -345,6 +316,13 @@ impl EmberConsumer {
         let Some((oid, request)) = node.clone().get_directory(&parent) else {
             return;
         };
+
+        if !self.requested_directories.insert(oid.clone()) {
+            #[cfg(feature = "tracing")]
+            debug!("Content of node {oid} already requested.");
+            return;
+        }
+
         #[cfg(feature = "tracing")]
         debug!("Fetching content of node {oid}: {node} using request: {request}");
         let api = self.api.clone();
