@@ -68,7 +68,6 @@ pub struct EmberConsumer {
     ember_sender: mpsc::Sender<Root>,
     ember_receiver: mpsc::Receiver<Root>,
     permanent_callbacks: HashMap<RelativeOid, NodeCallback>,
-    recursive_fetch_callbacks: HashMap<RelativeOid, NodeCallback>,
     shutdown_token: CancellationToken,
     api: EmberConsumerApi,
     requested_directories: HashSet<RelativeOid>,
@@ -87,7 +86,6 @@ impl EmberConsumer {
             ember_sender,
             ember_receiver,
             permanent_callbacks: HashMap::new(),
-            recursive_fetch_callbacks: HashMap::new(),
             shutdown_token,
             api: api.clone(),
             requested_directories: HashSet::new(),
@@ -117,7 +115,7 @@ impl EmberConsumer {
             }
         }
 
-        error!("Ember consumer closed.");
+        warn!("Ember consumer closed.");
         self.shutdown_token.cancel();
 
         Ok(())
@@ -136,24 +134,28 @@ impl EmberConsumer {
         #[cfg(feature = "tracing")]
         trace!("Received ember message: {msg}");
 
-        let mut cancel = false;
-
         match msg {
             Root::Elements(root_element_collection) => {
                 for e in root_element_collection.0 {
                     match e {
                         TaggedRootElement(RootElement::Element(element)) => match element {
                             Element::Parameter(parameter) => {
-                                cancel |= self
+                                if self
                                     .process_unqualified_root_element(TreeNode::Parameter(
                                         parameter,
                                     ))
-                                    .await?;
+                                    .await?
+                                {
+                                    return Ok(true);
+                                }
                             }
                             Element::Node(node) => {
-                                cancel |= self
+                                if self
                                     .process_unqualified_root_element(TreeNode::Node(node))
-                                    .await?;
+                                    .await?
+                                {
+                                    return Ok(true);
+                                }
                             }
                             Element::Command(command) => {
                                 // TODO can a producer send commands to a consumer?
@@ -161,9 +163,12 @@ impl EmberConsumer {
                                 warn!("Received command from producer: {command:?}");
                             }
                             Element::Matrix(matrix) => {
-                                cancel |= self
+                                if self
                                     .process_unqualified_root_element(TreeNode::Matrix(matrix))
-                                    .await?;
+                                    .await?
+                                {
+                                    return Ok(true);
+                                }
                             }
                             Element::Function(function) => {
                                 // TODO can a producer send functions to a consumer?
@@ -171,37 +176,49 @@ impl EmberConsumer {
                                 warn!("Received function from producer: {function:?}");
                             }
                             Element::Template(template) => {
-                                cancel |= self
+                                if self
                                     .process_unqualified_root_element(TreeNode::Template(template))
-                                    .await?;
+                                    .await?
+                                {
+                                    return Ok(true);
+                                }
                             }
                         },
                         TaggedRootElement(RootElement::QualifiedParameter(qualified_parameter)) => {
                             let qulified_path = qualified_parameter.path.clone();
-                            cancel |= self
+                            if self
                                 .process_qualified_root_element(
                                     qulified_path,
                                     TreeNode::QualifiedParameter(qualified_parameter),
                                 )
-                                .await?;
+                                .await?
+                            {
+                                return Ok(true);
+                            }
                         }
                         TaggedRootElement(RootElement::QualifiedNode(qualified_node)) => {
                             let qulified_path = qualified_node.path.clone();
-                            cancel |= self
+                            if self
                                 .process_qualified_root_element(
                                     qulified_path,
                                     TreeNode::QualifiedNode(qualified_node),
                                 )
-                                .await?;
+                                .await?
+                            {
+                                return Ok(true);
+                            }
                         }
                         TaggedRootElement(RootElement::QualifiedMatrix(qualified_matrix)) => {
                             let qulified_path = qualified_matrix.path.clone();
-                            cancel |= self
+                            if self
                                 .process_qualified_root_element(
                                     qulified_path,
                                     TreeNode::QualifiedMatrix(qualified_matrix),
                                 )
-                                .await?;
+                                .await?
+                            {
+                                return Ok(true);
+                            }
                         }
                         TaggedRootElement(RootElement::QualifiedFunction(qualified_function)) => {
                             // TODO can a producer send functions to a consumer?
@@ -212,12 +229,15 @@ impl EmberConsumer {
                         }
                         TaggedRootElement(RootElement::QualifiedTemplate(qualified_template)) => {
                             let qulified_path = qualified_template.path.clone();
-                            cancel |= self
+                            if self
                                 .process_qualified_root_element(
                                     qulified_path,
                                     TreeNode::QualifiedTemplate(qualified_template),
                                 )
-                                .await?;
+                                .await?
+                            {
+                                return Ok(true);
+                            }
                         }
                     }
                 }
@@ -226,7 +246,7 @@ impl EmberConsumer {
             Root::InvocationResult(invocation_result) => todo!(),
         }
 
-        Ok(cancel)
+        Ok(false)
     }
 
     async fn process_qualified_root_element(
@@ -248,59 +268,54 @@ impl EmberConsumer {
         parent: RelativeOid,
         node: TreeNode,
     ) -> EmberResult<bool> {
-        let recursive_fetch_callback = self.recursive_fetch_callbacks.get(&parent).cloned();
-        self.process_ember_node(parent, node, recursive_fetch_callback.as_ref())
-            .await
+        self.process_ember_node(parent, node).await
     }
 
     async fn process_ember_node(
         &mut self,
         parent: RelativeOid,
         node: TreeNode,
-        recursive_fetch_callback: Option<&mpsc::Sender<(RelativeOid, TreeNode)>>,
     ) -> EmberResult<bool> {
         let oid = node.oid(&parent);
 
         #[cfg(feature = "tracing")]
         debug!("Got content of node {parent}: {oid} {node}");
 
-        // TODO detect unknown nodes and traverse them automatically
-
         // this applies to non-leaf nodes in a tree structure
         if let Some((path, children)) = node.clone().children(&parent) {
             #[cfg(feature = "tracing")]
             debug!("Node {oid} seems to be a container, processing children …");
-            let recursive_fetch_callback = self.recursive_fetch_callbacks.get(&path).cloned();
-            let mut cancel = false;
             for node in children {
                 #[cfg(feature = "tracing")]
                 debug!("Processing child of {path}: {}", node.oid(&path));
-                cancel |= Box::pin(self.process_ember_node(
-                    path.clone(),
-                    node,
-                    recursive_fetch_callback.as_ref(),
-                ))
-                .await?;
+                if Box::pin(self.process_ember_node(path.clone(), node)).await? {
+                    return Ok(true);
+                }
             }
-            Ok(cancel)
+            Ok(false)
         }
         // this applies to leaf nodes in a tree structure or to qualified nodes
         else {
             #[cfg(feature = "tracing")]
             debug!("Looking up callbacks for node {oid} …");
 
-            if let Some(callback) = self.permanent_callbacks.get(&parent) {
+            if let Some(callback) = self.permanent_callbacks.get(&parent).cloned() {
                 #[cfg(feature = "tracing")]
                 debug!("Found callback for node {oid}");
-                if callback.send((parent.clone(), node.clone())).await.is_err() {
+
+                if self.requested_directories.insert(oid.clone()) {
+                    let p = parent.clone();
+                    let n = node.clone();
+                    let c = callback.clone();
+                    self.fetch_recursive(p, n, c).await;
+                } else {
+                    #[cfg(feature = "tracing")]
+                    debug!("Content of node {oid} already requested.");
+                }
+
+                if callback.send((parent, node)).await.is_err() {
                     return Ok(true);
                 }
-            }
-
-            if let Some(callback) = recursive_fetch_callback {
-                #[cfg(feature = "tracing")]
-                debug!("Found recursive fetch callback for node {oid}");
-                callback.send((parent.clone(), node.clone())).await.ok();
             }
 
             Ok(false)
@@ -317,27 +332,12 @@ impl EmberConsumer {
             return;
         };
 
-        if !self.requested_directories.insert(oid.clone()) {
-            #[cfg(feature = "tracing")]
-            debug!("Content of node {oid} already requested.");
-            return;
-        }
+        self.permanent_callbacks
+            .insert(oid.clone(), consumer.clone());
 
         #[cfg(feature = "tracing")]
         debug!("Fetching content of node {oid}: {node} using request: {request}");
-        let api = self.api.clone();
 
-        self.permanent_callbacks
-            .insert(oid.clone(), consumer.clone());
-        let (tx, mut rx) = mpsc::channel(1024);
-        spawn(async move {
-            while let Some((p, n)) = rx.recv().await {
-                api.fetch_recursive(p, n, consumer.clone()).await;
-            }
-        });
-        #[cfg(feature = "tracing")]
-        debug!("Adding recursive fetch callback for {oid} …");
-        self.recursive_fetch_callbacks.insert(oid, tx);
         self.ember_sender.send(request).await.ok();
     }
 }

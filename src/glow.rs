@@ -62,7 +62,6 @@ pub struct QualifiedTemplate {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(choice)]
-#[serde(untagged)]
 pub enum TemplateElement {
     Parameter(Parameter),
     Node(Node),
@@ -143,7 +142,6 @@ pub struct ParameterContents {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(choice)]
-#[serde(untagged)]
 pub enum Value {
     #[rasn(tag(universal, 2))] // INTEGER
     Integer(Integer64),
@@ -161,7 +159,6 @@ pub enum Value {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(choice)]
-#[serde(untagged)]
 pub enum MinMax {
     #[rasn(tag(universal, 2))]
     Integer(Integer64),
@@ -173,7 +170,6 @@ pub enum MinMax {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Copy, PartialEq, Eq, AsnType, Decode, Encode)]
 #[rasn(enumerated, tag(universal, 2))]
-#[serde(untagged)]
 pub enum ParameterType {
     Null = 0,
     Integer = 1,
@@ -189,7 +185,6 @@ pub enum ParameterType {
     Debug, Clone, Serialize, Deserialize, Default, Copy, PartialEq, Eq, AsnType, Decode, Encode,
 )]
 #[rasn(enumerated, tag(universal, 2))]
-#[serde(untagged)]
 pub enum ParameterAccess {
     None = 0,
     #[default]
@@ -229,7 +224,6 @@ pub struct StreamDescription {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Copy, PartialEq, Eq, AsnType, Decode, Encode)]
 #[rasn(enumerated, tag(universal, 2))]
-#[serde(untagged)]
 pub enum StreamFormat {
     UnsignedInt8 = 0,
     UnsignedInt16BigEndian = 2,
@@ -266,7 +260,6 @@ pub struct Command {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Copy, PartialEq, AsnType, Decode, Encode)]
 #[rasn(enumerated, tag(universal, 2))]
-#[serde(untagged)]
 pub enum CommandType {
     Subscribe = 30,
     Unsubscribe = 31,
@@ -277,7 +270,6 @@ pub enum CommandType {
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(choice)]
-#[serde(untagged)]
 pub enum CommandOptions {
     #[rasn(tag(explicit(context, 1)))]
     DirFieldMask(FieldFlags),
@@ -289,7 +281,6 @@ pub enum CommandOptions {
     Debug, Clone, Serialize, Deserialize, Default, Copy, PartialEq, Eq, AsnType, Decode, Encode,
 )]
 #[rasn(enumerated, tag(universal, 2))]
-#[serde(untagged)]
 pub enum FieldFlags {
     Sparse = -2,
     All = -1,
@@ -402,7 +393,6 @@ pub struct MatrixContents {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Copy, PartialEq, Eq, AsnType, Decode, Encode)]
 #[rasn(enumerated, tag(universal, 2))]
-#[serde(untagged)]
 pub enum MatrixType {
     OneToN = 0,
     OneToOne = 1,
@@ -411,7 +401,6 @@ pub enum MatrixType {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Copy, PartialEq, Eq, AsnType, Decode, Encode)]
 #[rasn(enumerated, tag(universal, 2))]
-#[serde(untagged)]
 pub enum MatrixAddressingMode {
     Linear = 0,
     NonLinear = 1,
@@ -419,7 +408,6 @@ pub enum MatrixAddressingMode {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(choice)]
-#[serde(untagged)]
 pub enum ParametersLocation {
     #[rasn(tag(universal, 13))] // RELATIVE-OID
     BasePath(RelativeOid),
@@ -523,7 +511,6 @@ pub struct PackedNumbers(pub RelativeOid);
 
 #[derive(Debug, Clone, Serialize, Deserialize, Copy, PartialEq, Eq, AsnType, Decode, Encode)]
 #[rasn(enumerated, tag(universal, 2))]
-#[serde(untagged)]
 pub enum ConnectionOperation {
     Absolute = 0,
     Connect = 1,
@@ -532,7 +519,6 @@ pub enum ConnectionOperation {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Copy, PartialEq, Eq, AsnType, Decode, Encode)]
 #[rasn(enumerated, tag(universal, 2))]
-#[serde(untagged)]
 pub enum ConnectionDisposition {
     Tally = 0,
     Modified = 1,
@@ -665,7 +651,6 @@ pub struct TaggedElement(pub Element);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(choice)]
-#[serde(untagged)]
 pub enum Element {
     Parameter(Parameter),
     Node(Node),
@@ -697,7 +682,6 @@ pub struct TaggedStreamEntry(pub StreamEntry);
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(tag(explicit(application, 0)))] // Root ::= [APPLICATION 0] CHOICE { ... } (explicit by module default)
 #[rasn(choice)]
-#[serde(untagged)]
 pub enum Root {
     Elements(RootElementCollection),
     Streams(StreamCollection),
@@ -715,7 +699,6 @@ pub struct TaggedRootElement(pub RootElement);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsnType, Decode, Encode)]
 #[rasn(choice)]
-#[serde(untagged)]
 pub enum RootElement {
     Element(Element),
     QualifiedParameter(QualifiedParameter),
@@ -898,7 +881,6 @@ mod ext {
     }
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
-    #[serde(untagged)]
     pub enum TreeNode {
         Root,
         Node(Node),
