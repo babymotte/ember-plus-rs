@@ -37,7 +37,7 @@ impl ClientHandler for EmberClientHandler {
     ) -> EmberResult<()> {
         while let Some(msg) = rx.recv().await {
             #[cfg(feature = "tracing")]
-            trace!("Received ember message: {msg:?}");
+            trace!("Received ember message: {msg}");
             // TODO
         }
 
