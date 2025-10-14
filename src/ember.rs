@@ -15,6 +15,10 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+use std::fmt;
+
+use serde::{Deserialize, Serialize};
+
 use crate::{
     error::{EmberError, EmberResult},
     s101::Flags,
@@ -22,7 +26,7 @@ use crate::{
 
 pub const MAX_PAYLOAD_LEN: usize = 1024;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EmberPacket {
     flag: Flags,
     dtd: u8,
@@ -101,5 +105,15 @@ impl EmberPacket {
             glow_version_maj: buf[4],
             payload: buf[5..].to_vec(),
         })
+    }
+}
+
+impl fmt::Display for EmberPacket {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            serde_json::to_string_pretty(self).expect("invalid json")
+        )
     }
 }

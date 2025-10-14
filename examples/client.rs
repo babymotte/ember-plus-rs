@@ -67,7 +67,7 @@ async fn process_event(parent: RelativeOid, node: TreeNode, wb: &Worterbuch) -> 
     let oid = node.oid(&parent);
 
     #[cfg(feature = "tracing")]
-    info!("Got update for content of node {parent}: {node:?}");
+    info!("Got update for content of node {parent}: {node}");
 
     match node {
         TreeNode::Parameter(param) => {

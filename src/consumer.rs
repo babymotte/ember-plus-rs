@@ -113,6 +113,9 @@ impl EmberConsumer {
             }
         }
 
+        error!("Ember consumer closed.");
+        self.shutdown_token.cancel();
+
         Ok(())
     }
 
@@ -275,7 +278,7 @@ impl EmberConsumer {
         let oid = node.oid(&parent);
 
         #[cfg(feature = "tracing")]
-        debug!("Got content of node {parent}: {oid} {node:?}");
+        debug!("Got content of node {parent}: {oid} {node}");
 
         // TODO detect unknown nodes and traverse them automatically
 
@@ -333,7 +336,7 @@ impl EmberConsumer {
             return;
         };
         #[cfg(feature = "tracing")]
-        debug!("Fetching content of node {oid}: {node:?} using request: {request:?}");
+        debug!("Fetching content of node {oid}: {node} using request: {request}");
         let api = self.api.clone();
 
         self.permanent_callbacks

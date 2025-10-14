@@ -122,35 +122,14 @@ async fn send_keepalive(
 
     loop {
         select! {
-                    _ = interval.tick() => {
-                        let frame = if use_non_escaping {
-        #[cfg(feature = "tracing")]
-                            debug!("Sending non-escaping keepalive request");
-                            S101Frame::NonEscaping(NonEscapingS101Frame::KeepaliveRequest)
-                        } else {
-        #[cfg(feature = "tracing")]
-                            debug!("Sending escaping keepalive request");
-                            S101Frame::Escaping(EscapingS101Frame::KeepaliveRequest)
-                        };
-                        if tx.send(frame).await.is_err() {
-                            break;
-                        }
-                    }
-                    _ = keepalive_request_rx.recv() => {
-                        let frame = if use_non_escaping {
-        #[cfg(feature = "tracing")]
-                            debug!("Received keepalive request. Sending non-escaping keepalive response");
-                            S101Frame::NonEscaping(NonEscapingS101Frame::KeepaliveResponse)
-                        } else {
-        #[cfg(feature = "tracing")]
-                            debug!("Received keepalive request. Sending escaping keepalive response");
-                            S101Frame::Escaping(EscapingS101Frame::KeepaliveResponse)
-                        };
-                        if tx.send(frame).await.is_err() {
-                            break;
-                        }
-                    }
-                }
+            Some(_) = keepalive_request_rx.recv() => if handle_keepalive_request(&tx, use_non_escaping).await {
+                break;
+            },
+            _ = interval.tick() => if keepalive_tick(&tx, use_non_escaping).await {
+                break;
+            },
+            else => break,
+        }
     }
 
     #[cfg(feature = "tracing")]
@@ -167,25 +146,41 @@ async fn send_keepalive_response(
 
     loop {
         select! {
-                    _ = keepalive_request_rx.recv() => {
-                        let frame = if use_non_escaping {
-        #[cfg(feature = "tracing")]
-                            debug!("Received keepalive request. Sending non-escaping keepalive response");
-                            S101Frame::NonEscaping(NonEscapingS101Frame::KeepaliveResponse)
-                        } else {
-        #[cfg(feature = "tracing")]
-                            debug!("Received keepalive request. Sending escaping keepalive response");
-                            S101Frame::Escaping(EscapingS101Frame::KeepaliveResponse)
-                        };
-                        if tx.send(frame).await.is_err() {
-                            break;
-                        }
-                    }
-                }
+            Some(_) = keepalive_request_rx.recv() => if handle_keepalive_request(&tx, use_non_escaping).await {
+                break;
+            },
+            else => break,
+        }
     }
 
     #[cfg(feature = "tracing")]
     debug!("Keepalive loop stopped.");
+}
+
+async fn keepalive_tick(tx: &mpsc::Sender<S101Frame>, use_non_escaping: bool) -> bool {
+    let frame = if use_non_escaping {
+        #[cfg(feature = "tracing")]
+        debug!("Sending non-escaping keepalive request");
+        S101Frame::NonEscaping(NonEscapingS101Frame::KeepaliveRequest)
+    } else {
+        #[cfg(feature = "tracing")]
+        debug!("Sending escaping keepalive request");
+        S101Frame::Escaping(EscapingS101Frame::KeepaliveRequest)
+    };
+    tx.send(frame).await.is_err()
+}
+
+async fn handle_keepalive_request(tx: &mpsc::Sender<S101Frame>, use_non_escaping: bool) -> bool {
+    let frame = if use_non_escaping {
+        #[cfg(feature = "tracing")]
+        debug!("Received keepalive request. Sending non-escaping keepalive response");
+        S101Frame::NonEscaping(NonEscapingS101Frame::KeepaliveResponse)
+    } else {
+        #[cfg(feature = "tracing")]
+        debug!("Received keepalive request. Sending escaping keepalive response");
+        S101Frame::Escaping(EscapingS101Frame::KeepaliveResponse)
+    };
+    tx.send(frame).await.is_err()
 }
 
 async fn send(
@@ -200,7 +195,7 @@ async fn send(
     // TODO socket timeouts
     while let Some(frame) = rx.recv().await {
         #[cfg(feature = "tracing")]
-        trace!("Sending frame {frame:?} …");
+        trace!("Sending frame {frame} …");
         let send_buf = frame.encode(&mut encode_buf, &mut out_buf);
         if let Err(e) = sock.write_all(send_buf).await {
             #[cfg(feature = "tracing")]
@@ -230,14 +225,14 @@ async fn receive(
         match S101Frame::decode(&mut sock, &mut buf).await {
             Ok(Some(frame)) => {
                 #[cfg(feature = "tracing")]
-                trace!("Received frame: {frame:?}");
+                trace!("Received frame: {frame}");
                 if frame.is_keepalive_request() {
                     if keepalive_tx.send(()).await.is_err() {
                         break;
                     }
                 } else if frame.is_keepalive_response() {
                     #[cfg(feature = "tracing")]
-                    trace!("Received frame: {frame:?}");
+                    trace!("Received frame: {frame}");
                 // TODO check for missing keepalive responses
                 } else if tx.send(frame).await.is_err() {
                     break;
@@ -319,7 +314,7 @@ async fn unframe(mut rx: mpsc::Receiver<S101Frame>, tx: mpsc::Sender<EmberPacket
             S101Frame::Escaping(EscapingS101Frame::EmberPacket(packet))
             | S101Frame::NonEscaping(NonEscapingS101Frame::EmberPacket(packet)) => {
                 #[cfg(feature = "tracing")]
-                trace!("Received EmBER+ packet: {packet:?}");
+                trace!("Received EmBER+ packet: {packet}");
                 if tx.send(packet).await.is_err() {
                     break;
                 }
@@ -364,7 +359,7 @@ async fn depacketize(mut rx: mpsc::Receiver<EmberPacket>, tx: mpsc::Sender<Root>
                     }
                 };
                 #[cfg(feature = "tracing")]
-                trace!("Decoded single packet EmBER+ message: {root:?}");
+                trace!("Decoded single packet EmBER+ message: {root}");
                 Some(root)
             }
             Flags::MultiPacketFirst => {
@@ -429,7 +424,7 @@ async fn depacketize(mut rx: mpsc::Receiver<EmberPacket>, tx: mpsc::Sender<Root>
                     }
                 };
                 #[cfg(feature = "tracing")]
-                trace!("Decoded multi-packet EmBER+ message: {root:?}");
+                trace!("Decoded multi-packet EmBER+ message: {root}");
                 Some(root)
             }
             Flags::EmptyPacket => None,

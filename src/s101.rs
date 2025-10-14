@@ -20,7 +20,8 @@ use crate::{
     ember::EmberPacket,
     error::{EmberError, EmberResult},
 };
-use std::{io::Read, slice};
+use serde::{Deserialize, Serialize};
+use std::{fmt, io::Read, slice};
 use tokio::io::{AsyncRead, AsyncReadExt};
 
 pub const BOF: u8 = 0xFE;
@@ -67,7 +68,7 @@ pub const CRC_TABLE: &[u16] = &[
 ];
 
 back_to_enum! {
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum Flags {
     SinglePacket = FLAG_SINGLE_PACKET as isize,
     MultiPacketFirst = FLAG_MULTI_PACKET_FIRST as isize,
@@ -76,7 +77,7 @@ pub enum Flags {
     EmptyPacket = FLAG_EMPTY_PACKET as isize,
 }}
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum S101Frame {
     Escaping(EscapingS101Frame),
     NonEscaping(NonEscapingS101Frame),
@@ -164,7 +165,17 @@ impl S101Frame {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+impl fmt::Display for S101Frame {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            serde_json::to_string_pretty(self).expect("invalid json")
+        )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum EscapingS101Frame {
     EmberPacket(EmberPacket),
     KeepaliveRequest,
@@ -321,7 +332,7 @@ impl EscapingS101Frame {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum NonEscapingS101Frame {
     EmberPacket(EmberPacket),
     KeepaliveRequest,

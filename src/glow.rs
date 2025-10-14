@@ -731,16 +731,13 @@ mod ext {
     use crate::{
         ember::{EmberPacket, MAX_PAYLOAD_LEN},
         error::EmberResult,
-        glow,
         s101::Flags,
         utils::{format_byte_size, join},
     };
     use rasn::{Codec, ber};
     #[cfg(feature = "tracing")]
-    use std::fs;
     use std::{
         fmt::{self, Debug},
-        path::PathBuf,
         time::Instant,
     };
     #[cfg(feature = "tracing")]
@@ -811,18 +808,6 @@ mod ext {
                 .flatten()
                 .map(|it| *it)
                 .collect::<Vec<u8>>();
-            if packets.len() >= 300 {
-                let reconstructed_payload = reconstructed_payload.clone();
-                let file_path = PathBuf::from(".").join(format!("{}.EmBER", packets.len()));
-                #[cfg(feature = "tracing")]
-                warn!("Dumping message to disk: {}", file_path.display());
-                #[cfg(feature = "tracing")]
-                if let Err(e) = fs::write(&file_path, &reconstructed_payload) {
-                    warn!("Could not dump payload to {}: {e}", file_path.display());
-                }
-                #[cfg(not(feature = "tracing"))]
-                fs::write(file_path, &reconstructed_payload).await.ok();
-            }
             #[cfg(feature = "tracing")]
             let start = Instant::now();
             let root = ber::decode::<Root>(&reconstructed_payload)?;
