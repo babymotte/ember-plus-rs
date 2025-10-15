@@ -430,10 +430,10 @@ async fn depacketize(mut rx: mpsc::Receiver<EmberPacket>, tx: mpsc::Sender<Root>
             Flags::EmptyPacket => None,
         };
 
-        if let Some(root) = root {
-            if tx.send(root).await.is_err() {
-                break;
-            }
+        if let Some(root) = root
+            && tx.send(root).await.is_err()
+        {
+            break;
         };
     }
 

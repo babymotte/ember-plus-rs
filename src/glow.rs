@@ -751,7 +751,7 @@ mod ext {
         pub fn get_directory(flags: Option<FieldFlags>) -> Self {
             Command {
                 number: CommandType::GetDirectory,
-                options: flags.map(|f| CommandOptions::DirFieldMask(f)),
+                options: flags.map(CommandOptions::DirFieldMask),
             }
         }
     }
@@ -767,7 +767,7 @@ mod ext {
     impl Root {
         pub fn to_packets(&self) -> EmberResult<Vec<EmberPacket>> {
             let payload = ber::encode(self)?;
-            let packet_count = if payload.len() == 0 {
+            let packet_count = if payload.is_empty() {
                 0
             } else {
                 1 + payload.len() / MAX_PAYLOAD_LEN
@@ -788,9 +788,8 @@ mod ext {
         pub fn from_packets(packets: &[EmberPacket]) -> EmberResult<Root> {
             let reconstructed_payload = packets
                 .iter()
-                .map(|p| p.payload())
-                .flatten()
-                .map(|it| *it)
+                .flat_map(|p| p.payload())
+                .copied()
                 .collect::<Vec<u8>>();
             #[cfg(feature = "tracing")]
             let start = Instant::now();

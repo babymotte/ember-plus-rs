@@ -11,12 +11,12 @@ macro_rules! back_to_enum {
         }
 
         impl std::convert::TryFrom<i32> for $name {
-            type Error = crate::error::EmberError;
+            type Error = $crate::error::EmberError;
 
             fn try_from(v: i32) -> Result<Self, Self::Error> {
                 match v {
                     $(x if x == $name::$vname as i32 => Ok($name::$vname),)*
-                    _ => Err(crate::error::EmberError::S101DecodeError),
+                    _ => Err($crate::error::EmberError::S101DecodeError),
                 }
             }
         }

@@ -73,7 +73,7 @@ async fn main() -> Result<()> {
 
 async fn process_event(event: TreeEvent, wb: &Worterbuch, start: Instant) -> Result<()> {
     match event {
-        TreeEvent::Element((parent, node)) => process_tree_element(parent, node, wb).await?,
+        TreeEvent::Element(element) => process_tree_element(element.0, element.1, wb).await?,
         TreeEvent::FullTreeReceived(nodes) => {
             #[cfg(feature = "tracing")]
             info!(

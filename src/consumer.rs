@@ -42,7 +42,7 @@ pub struct EmberConsumerApi {
 }
 
 pub enum TreeEvent {
-    Element((RelativeOid, TreeNode)),
+    Element(Box<(RelativeOid, TreeNode)>),
     FullTreeReceived(usize),
 }
 
@@ -332,7 +332,7 @@ impl EmberConsumer {
 
             for consumer in &self.permanent_consumers {
                 if consumer
-                    .send(TreeEvent::Element((parent.clone(), node.clone())))
+                    .send(TreeEvent::Element(Box::new((parent.clone(), node.clone()))))
                     .await
                     .is_err()
                 {
@@ -384,7 +384,7 @@ impl EmberConsumer {
         debug!("In flight GET_DIRECTORY commands: {}", self.in_flight.len());
 
         #[cfg(feature = "tracing")]
-        if self.explored.len() % 1_000 == 0 {
+        if self.explored.len().is_multiple_of(1_000) {
             use tracing::info;
             info!("Requested content of {} nodes …", self.explored.len());
         }

@@ -148,6 +148,7 @@ impl S101Frame {
         }
     }
 
+    #[allow(clippy::match_like_matches_macro)]
     pub(crate) fn is_keepalive_request(&self) -> bool {
         match self {
             S101Frame::Escaping(EscapingS101Frame::KeepaliveRequest)
@@ -156,6 +157,7 @@ impl S101Frame {
         }
     }
 
+    #[allow(clippy::match_like_matches_macro)]
     pub(crate) fn is_keepalive_response(&self) -> bool {
         match self {
             S101Frame::Escaping(EscapingS101Frame::KeepaliveResponse)
@@ -178,6 +180,7 @@ pub enum EscapingS101Frame {
     KeepaliveResponse,
 }
 
+#[allow(clippy::len_without_is_empty)]
 impl EscapingS101Frame {
     pub fn len(&self) -> usize {
         4 + match self {
@@ -245,7 +248,7 @@ impl EscapingS101Frame {
 
             if xor {
                 xor = false;
-                b = b ^ XOR;
+                b ^= XOR;
             }
 
             crc = Self::update_crc(crc, b);
@@ -283,7 +286,7 @@ impl EscapingS101Frame {
 
             if xor {
                 xor = false;
-                b = b ^ XOR;
+                b ^= XOR;
             }
 
             crc = EscapingS101Frame::update_crc(crc, b);
@@ -335,6 +338,7 @@ pub enum NonEscapingS101Frame {
     KeepaliveResponse,
 }
 
+#[allow(clippy::len_without_is_empty)]
 impl NonEscapingS101Frame {
     pub fn len(&self) -> usize {
         4 + match self {
@@ -412,8 +416,7 @@ impl NonEscapingS101Frame {
 
         let mut payload_len = 0usize;
         for b in &buf[..payload_bytes] {
-            payload_len = payload_len << 8;
-            payload_len += *b as usize;
+            payload_len = (payload_len << 8) + *b as usize;
         }
 
         if payload_len == 0 {
@@ -440,8 +443,7 @@ impl NonEscapingS101Frame {
 
         let mut payload_len = 0usize;
         for b in &buf[..payload_bytes] {
-            payload_len = payload_len << 8;
-            payload_len += *b as usize;
+            payload_len = (payload_len << 8) + *b as usize;
         }
 
         if payload_len == 0 {

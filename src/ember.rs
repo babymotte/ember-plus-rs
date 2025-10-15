@@ -87,7 +87,7 @@ impl EmberPacket {
         buf[2] = self.app_bytes;
         buf[3] = self.glow_version_min;
         buf[4] = self.glow_version_maj;
-        (&mut buf[5..]).copy_from_slice(&self.payload);
+        buf[5..].copy_from_slice(&self.payload);
     }
 
     pub fn from_bytes(buf: &[u8]) -> EmberResult<Self> {
