@@ -26,10 +26,14 @@ use tokio_util::sync::CancellationToken;
 #[cfg(feature = "tracing")]
 use tracing::{debug, error, trace, warn};
 
-pub type NodeCallback = mpsc::Sender<TreeEvent>;
+pub type NodeConsumer = mpsc::Sender<TreeEvent>;
 
 pub enum EmberConsumerApiMessage {
-    FetchRecursive(RelativeOid, TreeNode, NodeCallback),
+    FetchRecursive {
+        parent: RelativeOid,
+        node: TreeNode,
+        consumer: NodeConsumer,
+    },
 }
 
 #[derive(Clone)]
@@ -39,12 +43,12 @@ pub struct EmberConsumerApi {
 
 pub enum TreeEvent {
     Element((RelativeOid, TreeNode)),
-    FullTreeReceived,
+    FullTreeReceived(usize),
 }
 
 impl EmberConsumerApi {
     pub async fn fetch_full_tree(&self) -> mpsc::Receiver<TreeEvent> {
-        let (tx, rx) = mpsc::channel(1024);
+        let (tx, rx) = mpsc::channel(1024 * 1024);
         self.fetch_recursive(RelativeOid::root(), TreeNode::Root, tx)
             .await;
         rx
@@ -54,12 +58,14 @@ impl EmberConsumerApi {
         &self,
         parent: RelativeOid,
         node: TreeNode,
-        consumer: NodeCallback,
+        consumer: NodeConsumer,
     ) {
         self.tx
-            .send(EmberConsumerApiMessage::FetchRecursive(
-                parent, node, consumer,
-            ))
+            .send(EmberConsumerApiMessage::FetchRecursive {
+                parent,
+                node,
+                consumer,
+            })
             .await
             .ok();
     }
@@ -68,10 +74,11 @@ impl EmberConsumerApi {
 pub struct EmberConsumer {
     ember_sender: mpsc::Sender<Root>,
     ember_receiver: mpsc::Receiver<Root>,
-    permanent_callbacks: Vec<NodeCallback>,
+    permanent_consumers: Vec<NodeConsumer>,
     shutdown_token: CancellationToken,
     in_flight: HashSet<RelativeOid>,
     explored: HashSet<RelativeOid>,
+    query_offline_nodes: bool,
 }
 
 impl EmberConsumer {
@@ -79,6 +86,7 @@ impl EmberConsumer {
         ember_sender: mpsc::Sender<Root>,
         ember_receiver: mpsc::Receiver<Root>,
         shutdown_token: CancellationToken,
+        query_offline_nodes: bool,
     ) -> EmberConsumerApi {
         let (api_tx, api_rx) = mpsc::channel(1024);
         let api = EmberConsumerApi { tx: api_tx };
@@ -86,10 +94,11 @@ impl EmberConsumer {
         let consumer = Self {
             ember_sender,
             ember_receiver,
-            permanent_callbacks: Vec::new(),
+            permanent_consumers: Vec::new(),
             shutdown_token,
             in_flight: HashSet::new(),
             explored: HashSet::new(),
+            query_offline_nodes,
         };
 
         spawn(async move {
@@ -107,7 +116,9 @@ impl EmberConsumer {
     async fn run(mut self, mut rx: mpsc::Receiver<EmberConsumerApiMessage>) -> EmberResult<()> {
         loop {
             select! {
-                Some(recv) = rx.recv() => self.process_api_message(recv).await?,
+                Some(recv) = rx.recv() => if self.process_api_message(recv).await {
+                    break;
+                },
                 Some(msg) = self.ember_receiver.recv() => if self.process_ember_message(msg).await? {
                     break;
                 },
@@ -116,20 +127,26 @@ impl EmberConsumer {
             }
         }
 
+        #[cfg(feature = "tracing")]
         warn!("Ember consumer closed.");
+
         self.shutdown_token.cancel();
 
         Ok(())
     }
 
-    async fn process_api_message(&mut self, msg: EmberConsumerApiMessage) -> EmberResult<()> {
+    #[must_use]
+    async fn process_api_message(&mut self, msg: EmberConsumerApiMessage) -> bool {
         match msg {
-            EmberConsumerApiMessage::FetchRecursive(parent, node, consumer) => {
-                self.permanent_callbacks.push(consumer);
-                self.fetch_recursive(parent, node).await;
+            EmberConsumerApiMessage::FetchRecursive {
+                parent,
+                node,
+                consumer,
+            } => {
+                self.permanent_consumers.push(consumer);
+                self.fetch_recursive(parent, node).await
             }
         }
-        Ok(())
     }
 
     async fn process_ember_message(&mut self, msg: Root) -> EmberResult<bool> {
@@ -304,15 +321,17 @@ impl EmberConsumer {
                 if self.explored.insert(oid.clone()) {
                     let p = parent.clone();
                     let n = node.clone();
-                    self.fetch_recursive(p, n).await;
+                    if self.fetch_recursive(p, n).await {
+                        return Ok(true);
+                    }
                 } else {
                     #[cfg(feature = "tracing")]
                     debug!("Content of node {oid} already requested.");
                 }
             }
 
-            for callback in &self.permanent_callbacks {
-                if callback
+            for consumer in &self.permanent_consumers {
+                if consumer
                     .send(TreeEvent::Element((parent.clone(), node.clone())))
                     .await
                     .is_err()
@@ -327,8 +346,12 @@ impl EmberConsumer {
             debug!("In flight GET_DIRECTORY commands: {}", self.in_flight.len());
 
             if self.in_flight.is_empty() {
-                for callback in &self.permanent_callbacks {
-                    if callback.send(TreeEvent::FullTreeReceived).await.is_err() {
+                for consumer in &self.permanent_consumers {
+                    if consumer
+                        .send(TreeEvent::FullTreeReceived(self.explored.len()))
+                        .await
+                        .is_err()
+                    {
                         return Ok(true);
                     }
                 }
@@ -338,10 +361,20 @@ impl EmberConsumer {
         Ok(false)
     }
 
-    async fn fetch_recursive(&mut self, parent: RelativeOid, node: TreeNode) {
+    #[must_use]
+    async fn fetch_recursive(&mut self, parent: RelativeOid, node: TreeNode) -> bool {
         let Some((oid, request)) = node.clone().get_directory(&parent) else {
-            return;
+            return false;
         };
+
+        if !node.is_online() && !self.query_offline_nodes {
+            #[cfg(feature = "tracing")]
+            warn!(
+                "Not fetching content of node {} because it is offline.",
+                oid
+            );
+            return false;
+        }
 
         #[cfg(feature = "tracing")]
         debug!("Fetching content of node {oid}: {node} using request: {request}");
@@ -350,7 +383,13 @@ impl EmberConsumer {
         #[cfg(feature = "tracing")]
         debug!("In flight GET_DIRECTORY commands: {}", self.in_flight.len());
 
-        self.ember_sender.send(request).await.ok();
+        #[cfg(feature = "tracing")]
+        if self.explored.len() % 1_000 == 0 {
+            use tracing::info;
+            info!("Requested content of {} nodes …", self.explored.len());
+        }
+
+        self.ember_sender.send(request).await.is_err()
     }
 }
 
@@ -359,6 +398,7 @@ pub async fn start_tcp_consumer(
     keepalive: Option<Duration>,
     try_use_non_escaping: bool,
     cancellation_token: CancellationToken,
+    query_offline_nodes: bool,
 ) -> EmberResult<EmberConsumerApi> {
     #[cfg(feature = "tracing")]
     debug!("Connecting to provider {provider_addr} …");
@@ -371,7 +411,7 @@ pub async fn start_tcp_consumer(
 
     let (tx, rx) = ember_client_channel(keepalive, socket, try_use_non_escaping).await?;
 
-    let api = EmberConsumer::start(tx, rx, cancellation_token);
+    let api = EmberConsumer::start(tx, rx, cancellation_token, query_offline_nodes);
 
     Ok(api)
 }

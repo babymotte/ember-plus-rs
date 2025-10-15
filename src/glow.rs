@@ -720,7 +720,6 @@ mod ext {
         utils::{format_byte_size, join},
     };
     use rasn::{Codec, ber};
-    #[cfg(feature = "tracing")]
     use std::{
         fmt::{self, Debug},
         time::Instant,
@@ -974,7 +973,7 @@ mod ext {
 
         pub fn is_online(&self) -> bool {
             match self {
-                TreeNode::Root => false,
+                TreeNode::Root => true,
                 TreeNode::Node(node) => node.is_online(),
                 TreeNode::QualifiedNode(qualified_node) => qualified_node.is_online(),
                 TreeNode::Matrix(_) | TreeNode::QualifiedMatrix(_) => true,

@@ -24,9 +24,8 @@ use serde_json::json;
 use std::time::Instant;
 use tokio::select;
 use tokio_util::sync::CancellationToken;
-use tracing::debug;
 #[cfg(feature = "tracing")]
-use tracing::info;
+use tracing::{debug, info};
 use worterbuch_client::{Value, Worterbuch, topic};
 
 #[tokio::main]
@@ -40,15 +39,21 @@ async fn main() -> Result<()> {
     let shutdown_token = CancellationToken::new();
 
     let consumer = start_tcp_consumer(
-        "127.0.0.1:9000".parse().expect("malformed socket address"),
+        "10.230.31.159:9000"
+            .parse()
+            .expect("malformed socket address"),
         // Some(Duration::from_secs(1)),
         None,
         false,
         shutdown_token.clone(),
+        false,
     )
     .await?;
 
     let start = Instant::now();
+
+    #[cfg(feature = "tracing")]
+    info!("Fetching tree …");
 
     let mut rx = consumer.fetch_full_tree().await;
 
@@ -69,8 +74,13 @@ async fn main() -> Result<()> {
 async fn process_event(event: TreeEvent, wb: &Worterbuch, start: Instant) -> Result<()> {
     match event {
         TreeEvent::Element((parent, node)) => process_tree_element(parent, node, wb).await?,
-        TreeEvent::FullTreeReceived => {
-            info!("Full tree received after {:?}", start.elapsed());
+        TreeEvent::FullTreeReceived(nodes) => {
+            #[cfg(feature = "tracing")]
+            info!(
+                "Full tree with {} nodes received after {:?}",
+                nodes,
+                start.elapsed()
+            );
         }
     }
 
