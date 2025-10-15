@@ -9,7 +9,7 @@ default = ["tracing"]
 
 [dependencies]
 miette = "7.6.0"
-rasn = { path = "../rasn", version = "0.27.3" }
+rasn = "0.27.4"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
 serde_with = "3.15.0"
