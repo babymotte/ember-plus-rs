@@ -21,7 +21,7 @@ use ember_plus_rs::{
 };
 use miette::Result;
 use serde_json::json;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tokio::select;
 use tokio_util::sync::CancellationToken;
 #[cfg(feature = "tracing")]
@@ -39,11 +39,8 @@ async fn main() -> Result<()> {
     let shutdown_token = CancellationToken::new();
 
     let consumer = start_tcp_consumer(
-        "10.230.31.159:9000"
-            .parse()
-            .expect("malformed socket address"),
-        // Some(Duration::from_secs(1)),
-        None,
+        "127.0.0.1:9000".parse().expect("malformed socket address"),
+        Some(Duration::from_secs(1)),
         false,
         shutdown_token.clone(),
         false,
@@ -127,7 +124,9 @@ async fn publish(key: String, value: Value, wb: &Worterbuch) -> Result<()> {
                 Box::pin(publish(topic!(key, k), v, wb)).await?;
             }
         }
-        val => wb.set(key, val).await?,
+        val => {
+            wb.set_async(key, val).await?;
+        }
     }
 
     Ok(())

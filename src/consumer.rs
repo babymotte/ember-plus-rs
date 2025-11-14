@@ -314,20 +314,8 @@ impl EmberConsumer {
         }
         // this applies to leaf nodes in a tree structure or to qualified nodes
         else {
-            #[cfg(feature = "tracing")]
-            debug!("Looking up callbacks for node {oid} …");
-
-            if node.may_have_children() {
-                if self.explored.insert(oid.clone()) {
-                    let p = parent.clone();
-                    let n = node.clone();
-                    if self.fetch_recursive(p, n).await {
-                        return Ok(true);
-                    }
-                } else {
-                    #[cfg(feature = "tracing")]
-                    debug!("Content of node {oid} already requested.");
-                }
+            if self.fetch_recursive(parent.clone(), node.clone()).await {
+                return Ok(true);
             }
 
             for consumer in &self.permanent_consumers {
@@ -363,9 +351,19 @@ impl EmberConsumer {
 
     #[must_use]
     async fn fetch_recursive(&mut self, parent: RelativeOid, node: TreeNode) -> bool {
+        if !node.may_have_children() {
+            return false;
+        }
+
         let Some((oid, request)) = node.clone().get_directory(&parent) else {
             return false;
         };
+
+        if !self.explored.insert(oid.clone()) {
+            #[cfg(feature = "tracing")]
+            debug!("Content of node {oid} already requested.");
+            return false;
+        }
 
         if !node.is_online() && !self.query_offline_nodes {
             #[cfg(feature = "tracing")]
