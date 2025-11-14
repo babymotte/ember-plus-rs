@@ -980,7 +980,7 @@ mod ext {
                 TreeNode::QualifiedParameter(qualified_parameter) => {
                     qualified_parameter.is_online()
                 }
-                TreeNode::Template(_) | TreeNode::QualifiedTemplate(_) => false,
+                TreeNode::Template(_) | TreeNode::QualifiedTemplate(_) => true,
             }
         }
 
@@ -1086,9 +1086,9 @@ mod ext {
 
         fn is_online(&self) -> bool {
             let Some(contents) = &self.contents else {
-                return false;
+                return true;
             };
-            contents.is_online.unwrap_or(false)
+            contents.is_online.unwrap_or(true)
         }
     }
 
@@ -1109,9 +1109,9 @@ mod ext {
 
         fn is_online(&self) -> bool {
             let Some(contents) = &self.contents else {
-                return false;
+                return true;
             };
-            contents.is_online.unwrap_or(false)
+            contents.is_online.unwrap_or(true)
         }
     }
 
@@ -1122,9 +1122,9 @@ mod ext {
 
         fn is_online(&self) -> bool {
             let Some(contents) = &self.contents else {
-                return false;
+                return true;
             };
-            contents.is_online.unwrap_or(false)
+            contents.is_online.unwrap_or(true)
         }
 
         pub fn value(&self) -> Option<Value> {
@@ -1149,9 +1149,9 @@ mod ext {
 
         fn is_online(&self) -> bool {
             let Some(contents) = &self.contents else {
-                return false;
+                return true;
             };
-            contents.is_online.unwrap_or(false)
+            contents.is_online.unwrap_or(true)
         }
 
         pub fn value(&self) -> Option<Value> {
@@ -1168,9 +1168,9 @@ mod ext {
     impl Signal {
         fn is_online(&self) -> bool {
             let Some(contents) = &self.contents else {
-                return false;
+                return true;
             };
-            contents.is_online.unwrap_or(false)
+            contents.is_online.unwrap_or(true)
         }
     }
 
