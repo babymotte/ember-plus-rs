@@ -21,8 +21,9 @@ use crate::{
     glow::{Element, RelativeOid, Root, RootElement, TaggedRootElement, TreeNode},
 };
 use std::{collections::HashSet, net::SocketAddr, time::Duration};
-use tokio::{net::TcpStream, select, spawn, sync::mpsc};
+use tokio::{net::TcpStream, select, spawn, sync::mpsc, time::interval};
 use tokio_util::sync::CancellationToken;
+use tracing::info;
 #[cfg(feature = "tracing")]
 use tracing::{debug, error, trace, warn};
 
@@ -114,6 +115,8 @@ impl EmberConsumer {
     }
 
     async fn run(mut self, mut rx: mpsc::Receiver<EmberConsumerApiMessage>) -> EmberResult<()> {
+        let mut check_inf_flight = interval(Duration::from_secs(1));
+
         loop {
             select! {
                 Some(recv) = rx.recv() => if self.process_api_message(recv).await {
@@ -122,6 +125,7 @@ impl EmberConsumer {
                 Some(msg) = self.ember_receiver.recv() => if self.process_ember_message(msg).await? {
                     break;
                 },
+                _ = check_inf_flight.tick() => self.check_inf_flight(),
                 _ = self.shutdown_token.cancelled() => break,
                 else => break,
             }
@@ -266,6 +270,15 @@ impl EmberConsumer {
         }
 
         Ok(false)
+    }
+
+    fn check_inf_flight(&self) {
+        if !self.in_flight.is_empty() {
+            debug!(
+                "Requests still waiting for a response: {}",
+                self.in_flight.len()
+            );
+        }
     }
 
     async fn process_qualified_root_element(
