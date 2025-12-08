@@ -19,7 +19,7 @@ use crate::{
     ember::EmberPacket,
     error::EmberError,
     glow::Root,
-    s101::{EscapingS101Frame, Flags, NonEscapingS101Frame, S101Frame},
+    s101::{EscapingS101Frame, Flags, MAX_ENCODED_LENGTH, NonEscapingS101Frame, S101Frame},
     utils::format_bytes,
 };
 use std::time::Duration;
@@ -35,8 +35,6 @@ use tokio::{
 };
 #[cfg(feature = "tracing")]
 use tracing::{debug, error, trace, warn};
-
-const ENCODE_BUFFER_SIZE: usize = 1290;
 
 pub async fn ember_client_channel(
     keepalive: Option<Duration>,
@@ -60,7 +58,7 @@ async fn ember_channel(
     try_use_non_escaping: bool,
     negotiate: bool,
 ) -> Result<(mpsc::Sender<Root>, mpsc::Receiver<Root>), EmberError> {
-    let mut encode_buf = [0u8; ENCODE_BUFFER_SIZE];
+    let mut encode_buf = [0u8; MAX_ENCODED_LENGTH];
     let out_buf = Vec::new();
 
     let channel_buf_size = 1024 * 1024;
@@ -186,7 +184,7 @@ async fn handle_keepalive_request(tx: &mpsc::Sender<S101Frame>, use_non_escaping
 async fn send(
     mut rx: mpsc::Receiver<S101Frame>,
     mut sock: OwnedWriteHalf,
-    mut encode_buf: [u8; ENCODE_BUFFER_SIZE],
+    mut encode_buf: [u8; MAX_ENCODED_LENGTH],
     mut out_buf: Vec<u8>,
 ) {
     #[cfg(feature = "tracing")]
@@ -216,7 +214,7 @@ async fn receive(
     tx: mpsc::Sender<S101Frame>,
     keepalive_tx: mpsc::Sender<()>,
 ) {
-    let mut buf = [0u8; 65536];
+    let mut buf = [0u8; 655360];
 
     #[cfg(feature = "tracing")]
     debug!("Starting receive loop.");
@@ -240,7 +238,7 @@ async fn receive(
             }
             Ok(None) => {}
             Err(e) => match e {
-                EmberError::Deserialization(e) => {
+                EmberError::S101DecodeError(e) => {
                     #[cfg(feature = "tracing")]
                     warn!("Could not deserialize S101 frame: {e}");
                 }

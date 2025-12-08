@@ -28,8 +28,8 @@ pub enum EmberError {
     Io(#[from] io::Error),
     #[error("Connection error: {0}")]
     Connection(String),
-    #[error("S101 Decoder error")]
-    S101DecodeError,
+    #[error("S101 Decoder error: {0}")]
+    S101DecodeError(String),
     #[error("BER encode error: {0}")]
     BerEncodeError(#[from] EncodeError),
     #[error("BER decode error: {0}")]

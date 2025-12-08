@@ -15,14 +15,13 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use std::fmt;
-
-use serde::{Deserialize, Serialize};
-
 use crate::{
     error::{EmberError, EmberResult},
-    s101::Flags,
+    s101::{Flags, MAX_ENCODED_LENGTH},
 };
+use serde::{Deserialize, Serialize};
+use std::fmt;
+use tracing::warn;
 
 pub const MAX_PAYLOAD_LEN: usize = 1024;
 
@@ -91,6 +90,14 @@ impl EmberPacket {
     }
 
     pub fn from_bytes(buf: &[u8]) -> EmberResult<Self> {
+        if buf.len() > MAX_ENCODED_LENGTH {
+            warn!(
+                "Received EmBER packet exceeds maximum specified size (maximum allowed size is {} bytes, packet is {} bytes). This is a spec violation by the sender.",
+                MAX_PAYLOAD_LEN,
+                buf.len(),
+            );
+        }
+
         if buf.len() <= 5 {
             return Err(EmberError::Deserialization(format!(
                 "Invalid payload length {} (minimum is 6)",

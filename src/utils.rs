@@ -16,7 +16,7 @@ macro_rules! back_to_enum {
             fn try_from(v: i32) -> Result<Self, Self::Error> {
                 match v {
                     $(x if x == $name::$vname as i32 => Ok($name::$vname),)*
-                    _ => Err($crate::error::EmberError::S101DecodeError),
+                    _ => Err($crate::error::EmberError::S101DecodeError("unknown enum variant".into())),
                 }
             }
         }

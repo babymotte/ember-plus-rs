@@ -23,6 +23,7 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::{fmt, io::Read, slice};
 use tokio::io::{AsyncRead, AsyncReadExt};
+use tracing::warn;
 
 pub const BOF: u8 = 0xFE;
 pub const EOF: u8 = 0xFF;
@@ -40,8 +41,9 @@ pub const VERSION: u8 = 0x01;
 pub const FLAG_SINGLE_PACKET: u8 = 0xC0;
 pub const FLAG_MULTI_PACKET_FIRST: u8 = 0x80;
 pub const FLAG_MULTI_PACKET_LAST: u8 = 0x40;
-pub const FLAG_EMPTY_PACKET: u8 = 0x20;
 pub const FLAG_MULTI_PACKET: u8 = 0x00;
+pub const FLAG_EMPTY_PACKET: u8 = 0x20;
+pub const MAX_ENCODED_LENGTH: usize = 1290;
 pub const CRC_TABLE: &[u16] = &[
     0x0000, 0x1189, 0x2312, 0x329b, 0x4624, 0x57ad, 0x6536, 0x74bf, 0x8c48, 0x9dc1, 0xaf5a, 0xbed3,
     0xca6c, 0xdbe5, 0xe97e, 0xf8f7, 0x1081, 0x0108, 0x3393, 0x221a, 0x56a5, 0x472c, 0x75b7, 0x643e,
@@ -94,7 +96,7 @@ impl S101Frame {
         } else if buf[0] == BOFNE {
             NonEscapingS101Frame::decode_blocking(data, buf).map(|it| it.map(Self::NonEscaping))
         } else {
-            Err(EmberError::Deserialization(format!(
+            Err(EmberError::S101DecodeError(format!(
                 "invalid first byte: {:#04x}",
                 buf[0]
             )))
@@ -117,7 +119,7 @@ impl S101Frame {
                 .await
                 .map(|it| it.map(Self::NonEscaping))
         } else {
-            Err(EmberError::Deserialization(format!(
+            Err(EmberError::S101DecodeError(format!(
                 "invalid first byte: {:#04x}",
                 buf[0]
             )))
@@ -231,10 +233,11 @@ impl EscapingS101Frame {
         let mut xor = false;
         let mut b: u8 = 0x00;
         let mut pos = 0;
+        let mut buffer_size_exceeded = false;
         loop {
             data.read_exact(slice::from_mut(&mut b))?;
             if b == BOF {
-                return Err(EmberError::Deserialization("Unexpected BOF".to_owned()));
+                return Err(EmberError::S101DecodeError("Unexpected BOF".to_owned()));
             }
 
             if b == EOF {
@@ -246,6 +249,8 @@ impl EscapingS101Frame {
                 continue;
             }
 
+            buffer_size_exceeded |= pos > MAX_ENCODED_LENGTH;
+
             if xor {
                 xor = false;
                 b ^= XOR;
@@ -254,9 +259,23 @@ impl EscapingS101Frame {
             crc = Self::update_crc(crc, b);
             buf[pos] = b;
             pos += 1;
+
+            if pos >= buf.len() {
+                return Err(EmberError::S101DecodeError(
+                    "packet does not fit in buffer".into(),
+                ));
+            }
         }
+
+        if buffer_size_exceeded {
+            warn!(
+                "Received S101 frame exceeds maximum specified payload length (maximum allowed length is {} bytes, frame payload is {} bytes). This is a spec violation by the sender.",
+                MAX_ENCODED_LENGTH, pos
+            );
+        }
+
         if crc != CRC_CHECK {
-            return Err(EmberError::Deserialization(format!(
+            return Err(EmberError::S101DecodeError(format!(
                 "Invalid CRC: {crc:#06x}"
             )));
         }
@@ -269,10 +288,11 @@ impl EscapingS101Frame {
         let mut xor = false;
         let mut b: u8 = 0x00;
         let mut pos = 0;
+        let mut buffer_size_exceeded = false;
         loop {
             data.read_exact(slice::from_mut(&mut b)).await?;
             if b == BOF {
-                return Err(EmberError::Deserialization("Unexpected BOF".to_owned()));
+                return Err(EmberError::S101DecodeError("Unexpected BOF".to_owned()));
             }
 
             if b == EOF {
@@ -284,6 +304,8 @@ impl EscapingS101Frame {
                 continue;
             }
 
+            buffer_size_exceeded |= pos > MAX_ENCODED_LENGTH;
+
             if xor {
                 xor = false;
                 b ^= XOR;
@@ -292,9 +314,23 @@ impl EscapingS101Frame {
             crc = EscapingS101Frame::update_crc(crc, b);
             buf[pos] = b;
             pos += 1;
+
+            if pos >= buf.len() {
+                return Err(EmberError::S101DecodeError(
+                    "packet does not fit in buffer".into(),
+                ));
+            }
         }
+
+        if buffer_size_exceeded {
+            warn!(
+                "Received S101 frame exceeds maximum specified payload length (maximum allowed length is {} bytes, frame payload is {} bytes). This is a spec violation by the sender.",
+                MAX_ENCODED_LENGTH, pos
+            );
+        }
+
         if crc != CRC_CHECK {
-            return Err(EmberError::Deserialization(format!(
+            return Err(EmberError::S101DecodeError(format!(
                 "Invalid CRC: {crc:#06x}"
             )));
         }
@@ -310,7 +346,7 @@ impl EscapingS101Frame {
             }
             COMMAND_KEEPALIVE_REQUEST => Ok(EscapingS101Frame::KeepaliveRequest),
             COMMAND_KEEPALIVE_RESPONSE => Ok(EscapingS101Frame::KeepaliveRequest),
-            it => Err(EmberError::Deserialization(format!(
+            it => Err(EmberError::S101DecodeError(format!(
                 "Invalid command byte: {:#04x}",
                 it
             ))),
@@ -353,7 +389,7 @@ impl NonEscapingS101Frame {
             0
         } else if len <= u8::MAX as usize {
             1
-        } else if len <= u16::MAX as usize {
+        } else if len <= MAX_ENCODED_LENGTH {
             2
         } else {
             panic!("max message size exceeded")
@@ -369,7 +405,7 @@ impl NonEscapingS101Frame {
         } else if payload_len <= u8::MAX as usize {
             buf[1] = 0x01;
             buf[2] = payload_len as u8;
-        } else if payload_len <= u16::MAX as usize {
+        } else if payload_len <= MAX_ENCODED_LENGTH {
             buf[1] = 0x02;
             buf[2..4].copy_from_slice(&(payload_len as u16).to_le_bytes());
         } else {
@@ -412,6 +448,12 @@ impl NonEscapingS101Frame {
             return Ok(None);
         }
 
+        if payload_bytes > buf.len() {
+            return Err(EmberError::S101DecodeError(
+                "packet does not fit in buffer".to_owned(),
+            ));
+        }
+
         data.read_exact(&mut buf[..payload_bytes])?;
 
         let mut payload_len = 0usize;
@@ -421,6 +463,19 @@ impl NonEscapingS101Frame {
 
         if payload_len == 0 {
             return Ok(None);
+        }
+
+        if payload_len > buf.len() {
+            return Err(EmberError::S101DecodeError(
+                "packet does not fit in buffer".to_owned(),
+            ));
+        }
+
+        if payload_len > MAX_ENCODED_LENGTH {
+            warn!(
+                "Received S101 frame exceeds maximum specified payload length (maximum allowed length is {} bytes, frame payload is {} bytes). This is a spec violation by the sender.",
+                MAX_ENCODED_LENGTH, payload_len
+            )
         }
 
         data.read_exact(&mut buf[..payload_len])?;
@@ -439,6 +494,12 @@ impl NonEscapingS101Frame {
             return Ok(None);
         }
 
+        if payload_bytes > buf.len() {
+            return Err(EmberError::S101DecodeError(
+                "packet does not fit in buffer".to_owned(),
+            ));
+        }
+
         data.read_exact(&mut buf[..payload_bytes]).await?;
 
         let mut payload_len = 0usize;
@@ -448,6 +509,19 @@ impl NonEscapingS101Frame {
 
         if payload_len == 0 {
             return Ok(None);
+        }
+
+        if payload_len > buf.len() {
+            return Err(EmberError::S101DecodeError(
+                "packet does not fit in buffer".to_owned(),
+            ));
+        }
+
+        if payload_len > MAX_ENCODED_LENGTH {
+            warn!(
+                "Received S101 frame exceeds maximum specified payload length (maximum allowed length is {} bytes, frame payload is {} bytes). This is a spec violation by the sender.",
+                MAX_ENCODED_LENGTH, payload_len
+            )
         }
 
         data.read_exact(&mut buf[..payload_len]).await?;
@@ -460,7 +534,7 @@ impl NonEscapingS101Frame {
             COMMAND_EMBER_PACKET => EmberPacket::from_bytes(&buf[4..]).map(Self::EmberPacket),
             COMMAND_KEEPALIVE_REQUEST => Ok(Self::KeepaliveRequest),
             COMMAND_KEEPALIVE_RESPONSE => Ok(Self::KeepaliveRequest),
-            it => Err(EmberError::Deserialization(format!(
+            it => Err(EmberError::S101DecodeError(format!(
                 "Invalid command byte: {:#04x}",
                 it
             ))),

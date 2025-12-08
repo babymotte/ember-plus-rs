@@ -19,6 +19,7 @@ use ember_plus_rs::{
     consumer::{TreeEvent, start_tcp_consumer},
     glow::{RelativeOid, TreeNode},
 };
+use hashlink::LinkedHashMap;
 use miette::Result;
 use serde_json::json;
 use std::time::{Duration, Instant};
@@ -43,7 +44,6 @@ async fn main() -> Result<()> {
         Some(Duration::from_secs(1)),
         false,
         shutdown_token.clone(),
-        false,
     )
     .await?;
 
@@ -93,22 +93,22 @@ async fn process_tree_element(parent: RelativeOid, node: TreeNode, wb: &Worterbu
     match node {
         TreeNode::Node(node) => {
             if let Some(contents) = node.contents {
-                publish(key(oid), json!(contents), wb).await?;
+                publish(key(oid), json!({"contents": contents}), wb).await?;
             }
         }
         TreeNode::QualifiedNode(node) => {
             if let Some(contents) = node.contents {
-                publish(key(oid), json!(contents), wb).await?;
+                publish(key(oid), json!({"contents": contents}), wb).await?;
             }
         }
         TreeNode::Parameter(param) => {
             if let Some(contents) = param.contents {
-                publish(key(oid), json!(contents), wb).await?;
+                publish(key(oid), json!({"contents": contents}), wb).await?;
             }
         }
         TreeNode::QualifiedParameter(param) => {
             if let Some(contents) = param.contents {
-                publish(key(oid), json!(contents), wb).await?;
+                publish(key(oid), json!({"contents": contents}), wb).await?;
             }
         }
         _ => {}
@@ -161,3 +161,35 @@ mod logging {
             .init();
     }
 }
+
+struct Tree {
+    nodes: LinkedHashMap<String, Tree>,
+    parameters: LinkedHashMap<String, Parameter>,
+}
+
+enum Parameter {
+    String(StringParameter),
+    Integer(IntegerParameter),
+    Real(RealParameter),
+    Boolean(BooleanParameter),
+}
+
+impl From<ember_plus_rs::glow::Parameter> for Parameter {
+    fn from(value: ember_plus_rs::glow::Parameter) -> Self {
+        todo!()
+    }
+}
+
+impl From<ember_plus_rs::glow::QualifiedParameter> for Parameter {
+    fn from(value: ember_plus_rs::glow::QualifiedParameter) -> Self {
+        todo!()
+    }
+}
+
+struct StringParameter {}
+
+struct IntegerParameter {}
+
+struct RealParameter {}
+
+struct BooleanParameter {}

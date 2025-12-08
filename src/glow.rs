@@ -767,11 +767,7 @@ mod ext {
     impl Root {
         pub fn to_packets(&self) -> EmberResult<Vec<EmberPacket>> {
             let payload = ber::encode(self)?;
-            let packet_count = if payload.is_empty() {
-                0
-            } else {
-                1 + payload.len() / MAX_PAYLOAD_LEN
-            };
+            let packet_count = packet_count(&payload);
             let mut packets = Vec::with_capacity(packet_count);
             for i in 0..packet_count {
                 packets.push(EmberPacket::new(
@@ -864,6 +860,14 @@ mod ext {
         }
     }
 
+    pub(crate) fn packet_count(payload: &[u8]) -> usize {
+        if payload.is_empty() {
+            0
+        } else {
+            ((payload.len() as f32 / MAX_PAYLOAD_LEN as f32).ceil()) as usize
+        }
+    }
+
     impl fmt::Display for Root {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             write!(
@@ -894,6 +898,18 @@ mod ext {
     }
 
     impl TreeNode {
+        pub fn id(&self) -> Option<&str> {
+            match self {
+                TreeNode::Node(node) => node.id(),
+                TreeNode::QualifiedNode(qualified_node) => qualified_node.id(),
+                TreeNode::Matrix(matrix) => matrix.id(),
+                TreeNode::QualifiedMatrix(qualified_matrix) => qualified_matrix.id(),
+                TreeNode::Parameter(parameter) => parameter.id(),
+                TreeNode::QualifiedParameter(qualified_parameter) => qualified_parameter.id(),
+                TreeNode::Root | TreeNode::Template(_) | TreeNode::QualifiedTemplate(_) => None,
+            }
+        }
+
         pub fn get_directory(self, parent_path: &RelativeOid) -> Option<(RelativeOid, Root)> {
             let command = Command::get_directory(Some(FieldFlags::All));
             match self {
@@ -962,8 +978,7 @@ mod ext {
                 TreeNode::Root => false,
                 TreeNode::Node(node) => node.is_empty(),
                 TreeNode::QualifiedNode(qualified_node) => qualified_node.is_empty(),
-                TreeNode::Matrix(matrix) => matrix.is_empty(),
-                TreeNode::QualifiedMatrix(qualified_matrix) => qualified_matrix.is_empty(),
+                TreeNode::Matrix(_) | TreeNode::QualifiedMatrix(_) => true,
                 TreeNode::Parameter(parameter) => parameter.is_empty(),
                 TreeNode::QualifiedParameter(qualified_parameter) => qualified_parameter.is_empty(),
                 TreeNode::Template(_) | TreeNode::QualifiedTemplate(_) => true,
@@ -1046,7 +1061,9 @@ mod ext {
 
         pub(crate) fn may_have_children(&self) -> bool {
             match self {
-                TreeNode::Root | TreeNode::Node(_) | TreeNode::QualifiedNode(_) => true,
+                TreeNode::Root => true,
+                TreeNode::Node(n) => !n.is_empty(),
+                TreeNode::QualifiedNode(n) => !n.is_empty(),
                 TreeNode::Parameter(_) | TreeNode::QualifiedParameter(_) => false,
                 TreeNode::Matrix(_)
                 | TreeNode::QualifiedMatrix(_)
@@ -1080,8 +1097,16 @@ mod ext {
     }
 
     impl Node {
+        pub fn id(&self) -> Option<&str> {
+            self.contents.as_ref().and_then(|c| c.identifier.as_deref())
+        }
+
         pub fn is_empty(&self) -> bool {
-            self.children.is_none() && self.contents.is_none()
+            self.children
+                .as_ref()
+                .map(|c| c.0.is_empty())
+                .unwrap_or(true)
+                && self.contents.as_ref().map(|c| c.is_empty()).unwrap_or(true)
         }
 
         fn is_online(&self) -> bool {
@@ -1093,6 +1118,10 @@ mod ext {
     }
 
     impl QualifiedNode {
+        pub fn id(&self) -> Option<&str> {
+            self.contents.as_ref().and_then(|c| c.identifier.as_deref())
+        }
+
         pub fn command(path: RelativeOid, command: Command) -> QualifiedNode {
             QualifiedNode {
                 path,
@@ -1104,7 +1133,11 @@ mod ext {
         }
 
         pub fn is_empty(&self) -> bool {
-            self.children.is_none() && self.contents.is_none()
+            self.children
+                .as_ref()
+                .map(|c| c.0.is_empty())
+                .unwrap_or(true)
+                && self.contents.as_ref().map(|c| c.is_empty()).unwrap_or(true)
         }
 
         fn is_online(&self) -> bool {
@@ -1115,9 +1148,29 @@ mod ext {
         }
     }
 
-    impl Parameter {
+    impl NodeContents {
         pub fn is_empty(&self) -> bool {
-            self.children.is_none() && self.contents.is_none()
+            self.description.is_none()
+                && self.identifier.is_none()
+                // omitting this check to be compatible with TinyEmber, which sets isOnline on empty in spite of what the spec says
+                // && self.is_online.is_none()
+                && self.is_root.is_none()
+                && self.schema_identifiers.is_none()
+                && self.template_reference.is_none()
+        }
+    }
+
+    impl Parameter {
+        pub fn id(&self) -> Option<&str> {
+            self.contents.as_ref().and_then(|c| c.identifier.as_deref())
+        }
+
+        pub fn is_empty(&self) -> bool {
+            self.children
+                .as_ref()
+                .map(|c| c.0.is_empty())
+                .unwrap_or(true)
+                && self.contents.as_ref().map(|c| c.is_empty()).unwrap_or(true)
         }
 
         fn is_online(&self) -> bool {
@@ -1133,6 +1186,10 @@ mod ext {
     }
 
     impl QualifiedParameter {
+        pub fn id(&self) -> Option<&str> {
+            self.contents.as_ref().and_then(|c| c.identifier.as_deref())
+        }
+
         pub fn command(path: RelativeOid, command: Command) -> QualifiedParameter {
             QualifiedParameter {
                 path,
@@ -1144,7 +1201,11 @@ mod ext {
         }
 
         pub fn is_empty(&self) -> bool {
-            self.children.is_none() && self.contents.is_none()
+            self.children
+                .as_ref()
+                .map(|c| c.0.is_empty())
+                .unwrap_or(true)
+                && self.contents.as_ref().map(|c| c.is_empty()).unwrap_or(true)
         }
 
         fn is_online(&self) -> bool {
@@ -1159,9 +1220,19 @@ mod ext {
         }
     }
 
-    impl Matrix {
+    impl ParameterContents {
         pub fn is_empty(&self) -> bool {
-            self.children.is_none() && self.contents.is_none()
+            self.access.is_none()
+                && self.default.is_none()
+                && self.description.is_none()
+                && self.enum_map.is_none()
+                && self.enumeration.is_none()
+                && self.factor.is_none()
+                && self.format.is_none()
+                && self.formula.is_none()
+                && self.identifier.is_none()
+            // omitting this check to be compatible with TinyEmber, which sets isOnline on empty in spite of what the spec says
+            // && self.is_online.is_none()
         }
     }
 
@@ -1174,7 +1245,17 @@ mod ext {
         }
     }
 
+    impl Matrix {
+        pub fn id(&self) -> Option<&str> {
+            self.contents.as_ref().map(|c| c.identifier.as_str())
+        }
+    }
+
     impl QualifiedMatrix {
+        pub fn id(&self) -> Option<&str> {
+            self.contents.as_ref().map(|c| c.identifier.as_str())
+        }
+
         pub fn command(path: RelativeOid, command: Command) -> QualifiedMatrix {
             QualifiedMatrix {
                 path,
@@ -1187,14 +1268,6 @@ mod ext {
                 targets: None,
             }
         }
-
-        pub fn is_empty(&self) -> bool {
-            self.children.is_none()
-                && self.contents.is_none()
-                && self.connections.is_none()
-                && self.sources.is_none()
-                && self.targets.is_none()
-        }
     }
 
     impl QualifiedFunction {
@@ -1206,10 +1279,6 @@ mod ext {
                 ))])),
                 contents: None,
             }
-        }
-
-        pub fn is_empty(&self) -> bool {
-            self.children.is_none() && self.contents.is_none()
         }
     }
 
@@ -1392,6 +1461,48 @@ mod test {
         }
         let reconstructed = Root::from_packets(&packets).unwrap();
         assert_eq!(original, reconstructed);
+    }
+
+    #[test]
+    fn packet_count_is_calculated_correctly() {
+        let payload = [];
+        assert_eq!(0, packet_count(&payload));
+
+        let payload = [0; 1];
+        assert_eq!(1, packet_count(&payload));
+
+        let payload = [0; 10];
+        assert_eq!(1, packet_count(&payload));
+
+        let payload = [0; 100];
+        assert_eq!(1, packet_count(&payload));
+
+        let payload = [0; 1000];
+        assert_eq!(1, packet_count(&payload));
+
+        let payload = [0; 1024];
+        assert_eq!(1, packet_count(&payload));
+
+        let payload = [0; 1025];
+        assert_eq!(2, packet_count(&payload));
+
+        let payload = [0; 2047];
+        assert_eq!(2, packet_count(&payload));
+
+        let payload = [0; 2048];
+        assert_eq!(2, packet_count(&payload));
+
+        let payload = [0; 2049];
+        assert_eq!(3, packet_count(&payload));
+
+        let payload = [0; 3071];
+        assert_eq!(3, packet_count(&payload));
+
+        let payload = [0; 3072];
+        assert_eq!(3, packet_count(&payload));
+
+        let payload = [0; 3073];
+        assert_eq!(4, packet_count(&payload));
     }
 
     #[test]

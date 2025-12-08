@@ -20,7 +20,12 @@ use crate::{
     error::EmberResult,
     glow::{Element, RelativeOid, Root, RootElement, TaggedRootElement, TreeNode},
 };
-use std::{collections::HashSet, net::SocketAddr, time::Duration};
+use serde_json::json;
+use std::{
+    collections::{HashMap, HashSet},
+    net::SocketAddr,
+    time::Duration,
+};
 use tokio::{net::TcpStream, select, spawn, sync::mpsc, time::interval};
 use tokio_util::sync::CancellationToken;
 use tracing::info;
@@ -77,9 +82,8 @@ pub struct EmberConsumer {
     ember_receiver: mpsc::Receiver<Root>,
     permanent_consumers: Vec<NodeConsumer>,
     shutdown_token: CancellationToken,
-    in_flight: HashSet<RelativeOid>,
+    in_flight: HashMap<RelativeOid, (TreeNode, Root)>,
     explored: HashSet<RelativeOid>,
-    query_offline_nodes: bool,
 }
 
 impl EmberConsumer {
@@ -87,7 +91,6 @@ impl EmberConsumer {
         ember_sender: mpsc::Sender<Root>,
         ember_receiver: mpsc::Receiver<Root>,
         shutdown_token: CancellationToken,
-        query_offline_nodes: bool,
     ) -> EmberConsumerApi {
         let (api_tx, api_rx) = mpsc::channel(1024);
         let api = EmberConsumerApi { tx: api_tx };
@@ -97,9 +100,8 @@ impl EmberConsumer {
             ember_receiver,
             permanent_consumers: Vec::new(),
             shutdown_token,
-            in_flight: HashSet::new(),
+            in_flight: HashMap::new(),
             explored: HashSet::new(),
-            query_offline_nodes,
         };
 
         spawn(async move {
@@ -278,6 +280,10 @@ impl EmberConsumer {
                 "Requests still waiting for a response: {}",
                 self.in_flight.len()
             );
+
+            for (k, v) in self.in_flight.iter().map(|(k, v)| (k.to_owned(), json!(v))) {
+                trace!("{k} = {v}");
+            }
         }
     }
 
@@ -342,7 +348,19 @@ impl EmberConsumer {
             }
         }
 
-        if self.in_flight.remove(&parent) {
+        if self.received(&parent).await? {
+            return Ok(true);
+        }
+
+        if (node.is_empty()) && self.received(&node.oid(&parent)).await? {
+            return Ok(true);
+        }
+
+        Ok(false)
+    }
+
+    async fn received(&mut self, received: &RelativeOid) -> EmberResult<bool> {
+        if self.in_flight.remove(received).is_some() {
             #[cfg(feature = "tracing")]
             debug!("In flight GET_DIRECTORY commands: {}", self.in_flight.len());
 
@@ -378,9 +396,9 @@ impl EmberConsumer {
             return false;
         }
 
-        if !node.is_online() && !self.query_offline_nodes {
+        if !node.is_online() {
             #[cfg(feature = "tracing")]
-            warn!(
+            debug!(
                 "Not fetching content of node {} because it is offline.",
                 oid
             );
@@ -390,7 +408,8 @@ impl EmberConsumer {
         #[cfg(feature = "tracing")]
         debug!("Fetching content of node {oid}: {node} using request: {request}");
 
-        self.in_flight.insert(oid.clone());
+        self.in_flight
+            .insert(oid.clone(), (node.clone(), request.clone()));
         #[cfg(feature = "tracing")]
         debug!("In flight GET_DIRECTORY commands: {}", self.in_flight.len());
 
@@ -409,7 +428,6 @@ pub async fn start_tcp_consumer(
     keepalive: Option<Duration>,
     try_use_non_escaping: bool,
     cancellation_token: CancellationToken,
-    query_offline_nodes: bool,
 ) -> EmberResult<EmberConsumerApi> {
     #[cfg(feature = "tracing")]
     debug!("Connecting to provider {provider_addr} …");
@@ -422,7 +440,7 @@ pub async fn start_tcp_consumer(
 
     let (tx, rx) = ember_client_channel(keepalive, socket, try_use_non_escaping).await?;
 
-    let api = EmberConsumer::start(tx, rx, cancellation_token, query_offline_nodes);
+    let api = EmberConsumer::start(tx, rx, cancellation_token);
 
     Ok(api)
 }
